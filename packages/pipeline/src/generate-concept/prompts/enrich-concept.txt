@@ -1,0 +1,15 @@
+You are adding pedagogical metadata to existing concepts from a mathematics curriculum.
+
+Given the concept and its source evidence, enrich it with:
+1. difficulty: "beginner", "intermediate", or "advanced"
+2. masteryCriteria: 0.5-0.95 target threshold
+3. supports: whether visual representation is beneficial (true/false)
+4. representations: "concrete", "visual", "symbolic"
+5. adultContext: real-world adult-life application
+6. recommendedWidgets: widget categories for teaching this concept
+7. misconceptionTargets: refined list of likely student errors
+8. dependencies: resolved prerequisite conceptIds
+
+Rules:
+- Do NOT change the conceptId or coreIdea.
+- Visual concepts (place value, fractions, geometry) MUST have supports.visual = true.

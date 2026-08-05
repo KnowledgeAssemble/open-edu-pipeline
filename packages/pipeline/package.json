@@ -1,0 +1,43 @@
+{
+  "name": "@open-edu/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-driven content generation pipeline that transforms PDF textbooks into course-spec.md files",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "open-edu-pipeline": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc && mkdir -p dist/chunk/prompts dist/generate-concept/prompts dist/source dist/concepts dist/blueprint dist/validation && cp src/chunk/prompts/*.txt dist/chunk/prompts/ && cp src/generate-concept/prompts/*.txt dist/generate-concept/prompts/ && cp src/source/inventory-prompt.ts dist/source/ 2>/dev/null; cp src/concepts/prompt.ts dist/concepts/ 2>/dev/null; cp src/blueprint/prompt.ts dist/blueprint/ 2>/dev/null",
+    "test": "vitest run",
+    "test:generic": "vitest run -- generic-pipeline",
+    "test:fixture": "vitest run -- math-level-b-lesson1",
+    "validate:generated": "node dist/cli/validate.js",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "curriculum:generate": "node dist/cli/index.js"
+  },
+  "dependencies": {
+    "@open-edu/pipeline-llm": "workspace:*",
+    "@llamaindex/liteparse": "^2.8.0",
+    "zod": "^3.22.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}

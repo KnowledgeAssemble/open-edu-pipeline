@@ -1,0 +1,48 @@
+{
+  "documentId": "generic-science",
+  "title": "Introduction to Cells",
+  "totalPages": 5,
+  "units": [
+    {
+      "id": "src-1",
+      "type": "lesson",
+      "text": "Chapter 1: Introduction to Cells",
+      "location": { "pageStart": 1 },
+      "extractionConfidence": 0.95,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-2",
+      "type": "objective",
+      "text": "Learning Objectives: Understand what cells are",
+      "location": { "pageStart": 1 },
+      "extractionConfidence": 0.95,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-3",
+      "type": "definition",
+      "text": "A cell is the basic structural and functional unit of all living organisms.",
+      "location": { "pageStart": 2 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": false
+    },
+    {
+      "id": "src-4",
+      "type": "worked_example",
+      "text": "Example: Plant cells have a cell wall while animal cells do not.",
+      "location": { "pageStart": 3 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-5",
+      "type": "exercise",
+      "text": "Exercise: List three differences between plant and animal cells.",
+      "location": { "pageStart": 4 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    }
+  ],
+  "warnings": []
+}

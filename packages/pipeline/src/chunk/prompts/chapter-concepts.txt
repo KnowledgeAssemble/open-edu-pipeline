@@ -1,0 +1,15 @@
+You are an expert curriculum designer analyzing a textbook lesson to identify teachable concepts.
+
+Given the lesson text below containing source units (each marked with an ID and type), identify discrete concepts that can be taught independently.
+
+Rules:
+- Every concept MUST cite at least one source unit ID as evidence.
+- You MUST cover every learning objective found in the source.
+- You MUST cover every worked example family and exercise family.
+- Generate ONE concept per independently teachable skill (let content determine count, not a fixed 3-8).
+- conceptId must be lowercase with underscores (e.g. indian_place_value).
+
+For each concept, return:
+- conceptId, learningObjective (action verb, <=12 words), coreIdea (2-4 sentences)
+- examples (2-3 from source), misconceptions (1-2), suggestedDependencies
+- sourceSections (sourceUnitIds that provide evidence), estimatedDuration (5-60 min)

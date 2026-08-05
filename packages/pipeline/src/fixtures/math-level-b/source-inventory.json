@@ -1,0 +1,104 @@
+{
+  "documentId": "math-level-b",
+  "title": "Mathematics Level B",
+  "totalPages": 203,
+  "units": [
+    {
+      "id": "src-1",
+      "type": "lesson",
+      "text": "Lesson 1: Numbers",
+      "location": { "pageStart": 3 },
+      "extractionConfidence": 1.0,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-2",
+      "type": "objective",
+      "text": "LEARNING OUTCOMES: After completing this lesson, learners will be able to read and write large numbers...",
+      "location": { "pageStart": 3 },
+      "extractionConfidence": 0.95,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-3",
+      "type": "definition",
+      "text": "PLACE VALUE: The value of a digit depends on its place in the number.",
+      "location": { "pageStart": 4 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-4",
+      "type": "worked_example",
+      "text": "Example 1.1: Write the place value of each digit in 3,52,648.",
+      "location": { "pageStart": 5 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-5",
+      "type": "definition",
+      "text": "EXPANDED FORM: A number expressed as the sum of the place values of its digits.",
+      "location": { "pageStart": 6 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-6",
+      "type": "worked_example",
+      "text": "Example 1.2: Write 5,23,716 in expanded form.",
+      "location": { "pageStart": 6 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-7",
+      "type": "definition",
+      "text": "COMPARISON: Compare numbers digit by digit from the leftmost place.",
+      "location": { "pageStart": 8 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-8",
+      "type": "worked_example",
+      "text": "Example 1.3: Compare 3,52,648 and 3,52,846.",
+      "location": { "pageStart": 9 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-9",
+      "type": "exercise",
+      "text": "Let us see what you have learnt: 1. Write in figures. 2. Write in words. 3. Write expanded form...",
+      "location": { "pageStart": 12 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-10",
+      "type": "definition",
+      "text": "ORDERING: Arrange numbers in ascending (small to big) or descending (big to small) order.",
+      "location": { "pageStart": 14 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-11",
+      "type": "worked_example",
+      "text": "Example 1.4: Arrange 3,52,648; 3,25,468; 3,52,846 in ascending order.",
+      "location": { "pageStart": 14 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": true
+    },
+    {
+      "id": "src-12",
+      "type": "review",
+      "text": "What have you learnt: In this lesson you learned about place value, expanded form, comparison, and ordering of large numbers.",
+      "location": { "pageStart": 20 },
+      "extractionConfidence": 0.9,
+      "requiredCoverage": false
+    }
+  ],
+  "warnings": []
+}
