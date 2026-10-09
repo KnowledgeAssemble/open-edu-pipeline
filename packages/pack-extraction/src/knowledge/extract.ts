@@ -9,7 +9,13 @@ import type {
   KnowledgeStatement,
 } from './types.js';
 
-const EXAMPLE_RE = /^\*\*Example (\d+):?\*\*:?(.+)$/;
+const EXAMPLE_RE = /^[*_]{0,2}\s*Example\b\s*(\d+)?\s*:?\s*[*_]{0,2}\s*:?\s*(.+)$/i;
+
+function parseExample(line: string): string | null {
+  const match = EXAMPLE_RE.exec(line.trim());
+  const example = match?.[2]?.trim();
+  return example ? example : null;
+}
 
 export function extractKnowledge(
   doc: SourceDocumentModel,
@@ -52,16 +58,15 @@ export function extractKnowledge(
   for (const section of doc.sections) {
     if (section.type === 'example' && firstConcept) {
       for (const line of section.lines) {
-        const match = EXAMPLE_RE.exec(line);
-        const example = match?.[2]?.trim();
+        const example = parseExample(line);
         if (example) firstConcept.examples.push(example);
       }
     }
 
     if (section.type === 'objective') {
       for (const line of section.lines) {
-        if (!line.startsWith('*')) continue;
-        const statement = line.replace(/^\*\s*/, '').trim();
+        if (!line.startsWith('*') && !line.startsWith('-')) continue;
+        const statement = line.replace(/^[*+-]\s*/, '').trim();
         if (!statement) continue;
         statements.push({
           id: uniqueId(slugify(statement), seenStatementIds),

@@ -24,9 +24,12 @@
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "extract": "node dist/cli/index.js",
     "extract:slice": "node dist/cli/index.js --source ../../fixtures/nios-math-a/lesson-5-fractions.md --manifest ../../fixtures/nios-math-a/source-manifest.json --output ../../output --validate"
   },
   "dependencies": {
+    "@llamaindex/liteparse": "^2.8.0",
+    "@open-edu/pipeline-llm": "workspace:*",
     "zod": "^3.22.0"
   },
   "devDependencies": {

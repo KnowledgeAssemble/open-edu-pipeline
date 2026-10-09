@@ -1,6 +1,7 @@
 node_modules/
 dist/
 output/
+pdf/
 pnpm-lock.yaml
 docs/
 fixtures/

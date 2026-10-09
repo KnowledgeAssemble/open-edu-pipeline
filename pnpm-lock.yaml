@@ -35,6 +35,12 @@ importers:
 
   packages/pack-extraction:
     dependencies:
+      '@llamaindex/liteparse':
+        specifier: ^2.8.0
+        version: 2.11.0
+      '@open-edu/pipeline-llm':
+        specifier: workspace:*
+        version: link:../pipeline-llm
       zod:
         specifier: ^3.22.0
         version: 3.25.76
