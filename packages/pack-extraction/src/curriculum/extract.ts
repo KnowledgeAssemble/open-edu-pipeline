@@ -27,6 +27,8 @@ export function extractCurriculum(
   doc: SourceDocumentModel,
 ): CurriculumLikeness {
   const conceptIds = knowledge.concepts.map((concept) => concept.id);
+  // Deliberate slice simplification: objectives link to every extracted concept.
+  // Keyword/term-to-concept matching is a later enrichment, not this contract.
   const objectives = knowledge.statements.map((statement) => ({
     id: statement.id,
     description: statement.statement.slice(0, 500),

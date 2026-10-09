@@ -484,7 +484,7 @@ export type PackResult = { ok: true; report: string[] } | { ok: false; errors: s
 ```
 
    - Export `validateKnowledgePack(kindDir: string): PackResult` — reads `manifest.json` + `concepts.json`, runs both through the zod mirror, then spec §26 checks: `derivedFrom: 'document'` → every concept has a `source`; unique concept ids; prerequisite self-reference and cycles (DFS, Pack System §9.3).
-   - Export `validateCurriculumPack(kindDir: string, knowledgeConceptIds: Set<string>): PackResult` — reads `manifest.json` + `curriculum.json` through the zod mirror, then: every `concepts[].pack` equals a known knowledge pack id, every `concepts[].concept` ∈ `knowledgeConceptIds`; unit `prerequisites` reference sibling unit ids only.
+   - Export `validateCurriculumPack(kindDir: string, knowledgePackId: string, knowledgeConceptIds: Set<string>): PackResult` — reads `manifest.json` + `curriculum.json` through the zod mirror, then: every `concepts[].pack` equals `knowledgePackId`, every `concepts[].concept` ∈ `knowledgeConceptIds`; unit `prerequisites` reference sibling unit ids only.
    - Report lines are human-readable: `concepts: 3`, `concept fraction: source OK`, `ref fraction (nios-math-a-knowledge): OK`.
    - The function names and the knowledge-concept-set parameter are **mandatory** — cross-pack reference resolution is the spec §26 curriculum-check.
 3. Create `packages/pack-extraction/src/emit/emit.test.ts` and `packages/pack-extraction/src/validate/pack.test.ts`:
@@ -494,6 +494,8 @@ export type PackResult = { ok: true; report: string[] } | { ok: false; errors: s
    - Remove `source` from a concept → `ok: false` (derivedFrom gate).
    - Introduce a prerequisite cycle → `ok: false`.
    - A curriculum concept ref `{ pack: 'nios-math-a-knowledge', concept: 'misspell' }` with `misspell` not in the passed set → `ok: false`.
+   - A curriculum concept ref `{ pack: 'unknown-pack', concept: 'fraction' }` (valid concept, wrong pack) → `ok: false`.
+   - A knowledge-pack entry whose `manifest.type` is not `knowledge` → `ok: false`.
 
 **Verification:** task block.
 
@@ -530,7 +532,7 @@ export type PackResult = { ok: true; report: string[] } | { ok: false; errors: s
 12. if --validate:
       knowledgeIdSet = new Set(knowledge.concepts.map(c => c.id))
       vr = validateKnowledgePack(knowledgePack.paths[0]-parent)
-      cr = validateCurriculumPack(curriculumPack.paths[0]-parent, knowledgeIdSet)
+      cr = validateCurriculumPack(curriculumPack.paths[0]-parent, knowledgePackId, knowledgeIdSet)
       if !vr.ok or !cr.ok → print errors, return 1
 13. write review/fidelity-report.json = { status: 'pending-llm' }
     write review/human-review-flags.json = { items: [], generatedAt: <new Date().toISOString()> }

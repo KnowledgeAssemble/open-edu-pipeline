@@ -72,6 +72,10 @@ export function validateKnowledgePack(kindDir: string): PackResult {
   const concepts = conceptsResult.data;
   report.push(`concepts: ${concepts.length}`);
 
+  if (manifest.type !== 'knowledge') {
+    errors.push('manifest: type must be knowledge');
+  }
+
   const ids = new Set<string>();
   for (const concept of concepts) {
     if (ids.has(concept.id)) errors.push(`concept ${concept.id}: duplicate id`);
@@ -105,6 +109,7 @@ export function validateKnowledgePack(kindDir: string): PackResult {
 
 export function validateCurriculumPack(
   kindDir: string,
+  knowledgePackId: string,
   knowledgeConceptIds: Set<string>,
 ): PackResult {
   const errors: string[] = [];
@@ -137,7 +142,11 @@ export function validateCurriculumPack(
   const unitIds = new Set(curriculum.units.map((unit) => unit.id));
 
   const checkRef = (ref: ConceptRef): void => {
-    if (knowledgeConceptIds.has(ref.concept)) {
+    if (ref.pack !== knowledgePackId) {
+      errors.push(
+        `ref ${ref.concept} (${ref.pack}): unexpected pack (expected ${knowledgePackId})`,
+      );
+    } else if (knowledgeConceptIds.has(ref.concept)) {
       report.push(`ref ${ref.concept} (${ref.pack}): OK`);
     } else {
       errors.push(`ref ${ref.concept} (${ref.pack}): unknown concept`);

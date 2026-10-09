@@ -29,28 +29,36 @@ function parseArgs(argv: string[]): CliOptions {
     validate: false,
     help: false,
   };
+  const errors: string[] = [];
+
+  const requireValue = (name: string, value: string | undefined): string => {
+    if (value === undefined) errors.push(`${name} requires a value`);
+    return value ?? '';
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
       case '--source':
-        options.source = argv[index + 1] ?? '';
+        options.source = requireValue('--source', argv[index + 1]);
         index += 1;
         break;
       case '--manifest':
-        options.manifest = argv[index + 1] ?? '';
+        options.manifest = requireValue('--manifest', argv[index + 1]);
         index += 1;
         break;
       case '--output':
-        options.output = argv[index + 1] ?? options.output;
+        options.output = requireValue('--output', argv[index + 1]) || options.output;
         index += 1;
         break;
       case '--curriculum-pack-id':
-        options.curriculumPackId = argv[index + 1] ?? options.curriculumPackId;
+        options.curriculumPackId =
+          requireValue('--curriculum-pack-id', argv[index + 1]) || options.curriculumPackId;
         index += 1;
         break;
       case '--knowledge-pack-id':
-        options.knowledgePackId = argv[index + 1] ?? options.knowledgePackId;
+        options.knowledgePackId =
+          requireValue('--knowledge-pack-id', argv[index + 1]) || options.knowledgePackId;
         index += 1;
         break;
       case '--validate':
@@ -60,9 +68,11 @@ function parseArgs(argv: string[]): CliOptions {
         options.help = true;
         break;
       default:
-        break;
+        errors.push(`unknown option: ${arg}`);
     }
   }
+
+  if (errors.length > 0 && !options.help) throw new Error(errors.join('\n'));
 
   return options;
 }
@@ -196,6 +206,7 @@ export async function run(argv: string[]): Promise<number> {
       const knowledgeResult = validateKnowledgePack(dirname(knowledgePack.paths[0] ?? ''));
       const curriculumResult = validateCurriculumPack(
         dirname(curriculumPack.paths[0] ?? ''),
+        options.knowledgePackId,
         knowledgeConceptIds,
       );
 
