@@ -11,7 +11,13 @@ import { extractCurriculum, toCurriculum } from '../curriculum/extract.js';
 import { writeJson, emitKnowledgePack, emitCurriculumPack } from '../emit/write.js';
 import { validateKnowledgePack, validateCurriculumPack } from '../validate/pack.js';
 import { canMergeEnrichmentIntoPack, runEnrichment } from '../enrich/index.js';
+import { orchestrate } from '../run/orchestrate.js';
+import { resolveTierConfig } from '../config/stage-config.js';
+import type { TierConfig } from '../config/stage-config.js';
+import type { LlmClient } from '../llm/client.js';
 import type { Concept, PackManifest } from '../schemas/index.js';
+
+type LlmMode = 'auto' | 'force' | 'off';
 
 interface CliOptions {
   source: string;
@@ -26,6 +32,18 @@ interface CliOptions {
   llmModel?: string;
   validate: boolean;
   help: boolean;
+  llmMode: LlmMode;
+  provider?: string;
+  fastModel?: string;
+  escalationModel?: string;
+  maxBudgetUsd: number;
+  dryRun: boolean;
+  force: boolean;
+  chapters?: string;
+  tocPages?: string;
+  chapterHeading?: RegExp;
+  allowPartial: boolean;
+  legacy: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -39,6 +57,12 @@ function parseArgs(argv: string[]): CliOptions {
     enrich: false,
     validate: false,
     help: false,
+    llmMode: 'auto',
+    maxBudgetUsd: 2.0,
+    dryRun: false,
+    force: false,
+    allowPartial: false,
+    legacy: false,
   };
   const errors: string[] = [];
 
@@ -105,6 +129,66 @@ function parseArgs(argv: string[]): CliOptions {
         options.llmModel = requireValue('--llm-model', argv[index + 1]) || undefined;
         index += 1;
         break;
+      case '--llm':
+        options.llmMode = 'force';
+        break;
+      case '--no-llm':
+        options.llmMode = 'off';
+        break;
+      case '--provider':
+        options.provider = requireValue('--provider', argv[index + 1]) || undefined;
+        index += 1;
+        break;
+      case '--fast-model':
+        options.fastModel = requireValue('--fast-model', argv[index + 1]) || undefined;
+        index += 1;
+        break;
+      case '--escalation-model':
+        options.escalationModel = requireValue('--escalation-model', argv[index + 1]) || undefined;
+        index += 1;
+        break;
+      case '--max-budget-usd': {
+        const value = Number.parseFloat(requireValue('--max-budget-usd', argv[index + 1]));
+        if (!Number.isFinite(value) || value < 0) {
+          errors.push('--max-budget-usd must be a non-negative number');
+        } else {
+          options.maxBudgetUsd = value;
+        }
+        index += 1;
+        break;
+      }
+      case '--dry-run':
+        options.dryRun = true;
+        break;
+      case '--force':
+        options.force = true;
+        break;
+      case '--chapters':
+        options.chapters = requireValue('--chapters', argv[index + 1]) || undefined;
+        index += 1;
+        break;
+      case '--toc-pages':
+        options.tocPages = requireValue('--toc-pages', argv[index + 1]) || undefined;
+        index += 1;
+        break;
+      case '--chapter-heading': {
+        const value = requireValue('--chapter-heading', argv[index + 1]);
+        if (value) {
+          try {
+            options.chapterHeading = new RegExp(value);
+          } catch {
+            errors.push(`--chapter-heading is not a valid regular expression: ${value}`);
+          }
+        }
+        index += 1;
+        break;
+      }
+      case '--allow-partial':
+        options.allowPartial = true;
+        break;
+      case '--legacy':
+        options.legacy = true;
+        break;
       case '--validate':
         options.validate = true;
         break;
@@ -137,6 +221,17 @@ function printUsage(): void {
       '  --enrich                     Run optional LLM enrichment into review/ only',
       '  --llm-provider <name>        Enrichment provider (openai|openrouter)',
       '  --llm-model <model>          Enrichment model',
+      '  --llm / --no-llm             Force LLM for all chapters / forbid LLM (default: auto)',
+      '  --provider <name>            Chapter-pipeline provider (openai|openrouter)',
+      '  --fast-model <model>         Fast tier model (honors LLM_FAST_MODEL)',
+      '  --escalation-model <model>   Escalation tier model (honors LLM_ESCALATION_MODEL)',
+      '  --max-budget-usd <n>         Estimated spend cap (default: 2.0)',
+      '  --dry-run                    Chapter plan + cost estimate, no calls',
+      '  --force                      Bust the response cache',
+      '  --chapters <slugs|ranges>    Subset re-run (e.g. unit-3 or unit-3..unit-5)',
+      '  --toc-pages <range>          TOC page range hint (e.g. 12-14)',
+      '  --chapter-heading <regex>    Explicit chapter heading fallback',
+      '  --allow-partial              Treat pending-human chapters as warnings',
       '  --validate                   Validate emitted packs',
       '  --help                       Show this help',
     ].join('\n'),
@@ -324,6 +419,21 @@ async function emitLesson(input: LessonEmitInput): Promise<number> {
   return 0;
 }
 
+function hasLlmCredentials(): boolean {
+  return Boolean(
+    process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY,
+  );
+}
+
+async function createLlmClient(tierConfig: TierConfig): Promise<LlmClient> {
+  const { PipelineLlmClient } = await import('../llm/pipeline-llm-client.js');
+  return new PipelineLlmClient({
+    provider: tierConfig.provider,
+    fastModel: tierConfig.fast,
+    escalationModel: tierConfig.escalation,
+  });
+}
+
 export async function run(argv: string[]): Promise<number> {
   try {
     const options = parseArgs(argv);
@@ -343,6 +453,61 @@ export async function run(argv: string[]): Promise<number> {
       : deriveManifest(options.source);
 
     const source = await readSource(options.source, manifest);
+
+    const explicitPipeline =
+      options.dryRun ||
+      options.llmMode === 'force' ||
+      options.llmMode === 'off' ||
+      options.force ||
+      options.chapters !== undefined ||
+      options.tocPages !== undefined ||
+      options.chapterHeading !== undefined;
+    const nonMarkdown = !isPlainTextSource(options.source);
+    const autoChapter = options.manifest !== '' && nonMarkdown && hasLlmCredentials();
+    const useChapterPipeline = !options.legacy && (explicitPipeline || autoChapter);
+
+    if (options.llmMode === 'force' && !hasLlmCredentials()) {
+      console.error(
+        '--llm requested but no API key found (LLM_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY)',
+      );
+      return 1;
+    }
+
+    if (useChapterPipeline) {
+      const tierConfig = resolveTierConfig({
+        provider: options.provider,
+        fastModel: options.fastModel,
+        escalationModel: options.escalationModel,
+      });
+      let llmClient: LlmClient | undefined;
+      if (options.llmMode !== 'off' && hasLlmCredentials()) {
+        llmClient = await createLlmClient(tierConfig);
+      }
+      const result = await orchestrate({
+        markdown: source.markdown,
+        manifest,
+        workingDir: join(options.output, manifest.id),
+        knowledgePackId: options.knowledgePackId,
+        curriculumPackId: options.curriculumPackId,
+        knowledgeName: `${manifest.title} — Knowledge`,
+        curriculumName: `${manifest.title} — Curriculum`,
+        sourceFilename: source.sourceFilename,
+        writeSource: source.writeSource,
+        llmMode: options.llmMode,
+        llmClient,
+        tierConfig,
+        maxBudgetUsd: options.maxBudgetUsd,
+        dryRun: options.dryRun,
+        force: options.force,
+        chapters: options.chapters,
+        tocPages: options.tocPages,
+        chapterHeading: options.chapterHeading,
+        allowPartial: options.allowPartial,
+        validate: options.validate,
+        log: (message) => console.log(message),
+      });
+      return result.exitCode;
+    }
 
     const lessons = segmentMarkdown(source.markdown, { lessonHeading: options.lessonHeading });
 

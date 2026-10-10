@@ -18,3 +18,60 @@ export function resolveEnrichmentConfig(
     model: opts.model ?? process.env.LLM_MODEL ?? DEFAULT_ENRICHMENT_MODEL,
   };
 }
+
+export const DEFAULT_PROVIDER = 'openai';
+export const DEFAULT_FAST_MODEL = 'gpt-4o-mini';
+export const DEFAULT_ESCALATION_MODEL = 'gpt-4o';
+
+export interface TierConfig {
+  provider: string;
+  fast: string;
+  escalation: string;
+}
+
+/**
+ * Resolve the fast/escalation models following pipeline-llm's `ModelTier` naming
+ * convention and `LLM_FAST_MODEL` / `LLM_ESCALATION_MODEL` env vars.
+ */
+export function resolveTierConfig(
+  opts: { provider?: string; fastModel?: string; escalationModel?: string } = {},
+): TierConfig {
+  return {
+    provider: opts.provider ?? process.env.LLM_PROVIDER ?? DEFAULT_PROVIDER,
+    fast: opts.fastModel ?? process.env.LLM_FAST_MODEL ?? DEFAULT_FAST_MODEL,
+    escalation:
+      opts.escalationModel ?? process.env.LLM_ESCALATION_MODEL ?? DEFAULT_ESCALATION_MODEL,
+  };
+}
+
+export interface ModelPrice {
+  input: number; // USD per 1M input tokens
+  output: number; // USD per 1M output tokens
+}
+
+/** Conservative per-1M-token USD prices, keyed by model name (estimates only). */
+export const PRICE_TABLE: Record<string, ModelPrice> = {
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-4o': { input: 2.5, output: 10 },
+  'gpt-5.4-mini': { input: 0.25, output: 1.0 },
+  'gpt-5.4': { input: 2.5, output: 10 },
+  'gemini-2.0-flash-001': { input: 0.1, output: 0.4 },
+  'anthropic/claude-3.5-sonnet': { input: 3, output: 15 },
+  'openai/gpt-4o-mini': { input: 0.15, output: 0.6 },
+};
+
+export const FALLBACK_PRICE: ModelPrice = { input: 2.5, output: 10 };
+
+export function priceFor(model: string): ModelPrice {
+  return PRICE_TABLE[model] ?? FALLBACK_PRICE;
+}
+
+/** Rough char-based token estimate (chars / 4), matching the plan's heuristic. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+export function estimateCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+  const price = priceFor(model);
+  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+}
