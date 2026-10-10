@@ -1,0 +1,124 @@
+import { describe, it, expect } from 'vitest';
+import { applyMerge } from './merge.js';
+import type { VerifiedConcept } from './verify.js';
+
+function concept(id: string, chapterId: string, title = id): VerifiedConcept {
+  return {
+    id,
+    term: title,
+    title,
+    summary: `${title} summary`,
+    excerpt: title,
+    chapterId,
+    origin: 'derived',
+  };
+}
+
+const chapterText = new Map<string, string>([
+  ['unit-1', '# Unit 1\n\nA fraction represents part of a whole.'],
+  ['unit-2', '# Unit 2\n\nA numerator is the top number.'],
+]);
+
+describe('applyMerge', () => {
+  it('keeps all concepts unchanged when nothing is merged', () => {
+    const concepts = [concept('fraction', 'unit-1'), concept('numerator', 'unit-2')];
+    const result = applyMerge({ concepts, result: undefined, chapterText });
+    expect(result.concepts.map((c) => c.id)).toEqual(['fraction', 'numerator']);
+    expect(result.prerequisites).toEqual([]);
+    expect(result.mergeMap.clusters).toEqual([]);
+  });
+
+  it('merges duplicate clusters into the canonical id', () => {
+    const concepts = [concept('fraction', 'unit-1'), concept('unit-2--fraction', 'unit-2')];
+    const result = applyMerge({
+      concepts,
+      result: {
+        duplicateClusters: [{ canonicalId: 'fraction', duplicateIds: ['unit-2--fraction'] }],
+        prerequisiteLinks: [],
+      },
+      chapterText,
+    });
+    expect(result.concepts.map((c) => c.id)).toEqual(['fraction']);
+    expect(result.mergeMap.clusters).toEqual([
+      { canonicalId: 'fraction', mergedIds: ['unit-2--fraction'] },
+    ]);
+    expect(result.resolution.get('unit-2--fraction')).toBe('fraction');
+  });
+
+  it('excludes temporary ids that were never resolved', () => {
+    const concepts = [concept('fraction', 'unit-1'), concept('unit-2--fraction', 'unit-2')];
+    const result = applyMerge({ concepts, result: undefined, chapterText });
+    expect(result.concepts.map((c) => c.id)).toEqual(['fraction']);
+    expect(result.mergeMap.excluded).toEqual([
+      { id: 'unit-2--fraction', reason: 'unresolved-temp-id' },
+    ]);
+  });
+
+  it('keeps grounded prerequisite links', () => {
+    const concepts = [concept('fraction', 'unit-1'), concept('numerator', 'unit-2')];
+    const result = applyMerge({
+      concepts,
+      result: {
+        duplicateClusters: [],
+        prerequisiteLinks: [
+          {
+            fromId: 'fraction',
+            toId: 'numerator',
+            evidenceExcerpt: 'A numerator is the top number.',
+          },
+        ],
+      },
+      chapterText,
+    });
+    expect(result.prerequisites).toEqual([{ fromId: 'fraction', toId: 'numerator' }]);
+    expect(result.unresolvedPrereqs).toEqual([]);
+  });
+
+  it('drops ungrounded prerequisite evidence', () => {
+    const concepts = [concept('fraction', 'unit-1'), concept('numerator', 'unit-2')];
+    const result = applyMerge({
+      concepts,
+      result: {
+        duplicateClusters: [],
+        prerequisiteLinks: [
+          { fromId: 'fraction', toId: 'numerator', evidenceExcerpt: 'invented evidence' },
+        ],
+      },
+      chapterText,
+    });
+    expect(result.prerequisites).toEqual([]);
+    expect(result.unresolvedPrereqs[0]?.reason).toBe('ungrounded-evidence');
+  });
+
+  it('breaks prerequisite cycles', () => {
+    const concepts = [concept('a', 'unit-1'), concept('b', 'unit-2')];
+    const result = applyMerge({
+      concepts,
+      result: {
+        duplicateClusters: [],
+        prerequisiteLinks: [
+          { fromId: 'a', toId: 'b', evidenceExcerpt: 'part of a whole' },
+          { fromId: 'b', toId: 'a', evidenceExcerpt: 'top number' },
+        ],
+      },
+      chapterText,
+    });
+    expect(result.prerequisites).toEqual([{ fromId: 'a', toId: 'b' }]);
+    expect(result.unresolvedPrereqs.some((item) => item.reason === 'cycle')).toBe(true);
+  });
+
+  it('reports unknown ids in clusters and links', () => {
+    const concepts = [concept('fraction', 'unit-1')];
+    const result = applyMerge({
+      concepts,
+      result: {
+        duplicateClusters: [{ canonicalId: 'ghost', duplicateIds: ['fraction'] }],
+        prerequisiteLinks: [
+          { fromId: 'fraction', toId: 'ghost', evidenceExcerpt: 'part of a whole' },
+        ],
+      },
+      chapterText,
+    });
+    expect(result.unresolvedPrereqs.some((item) => item.reason === 'unknown-id')).toBe(true);
+  });
+});
