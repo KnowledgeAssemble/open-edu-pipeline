@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Chapter } from '../chapters/types.js';
-import { isGrounded, normalizeWs, stripMarkdown, verifyExtraction } from './verify.js';
+import { cappedId, isGrounded, normalizeWs, stripMarkdown, verifyExtraction } from './verify.js';
 
 const chapter: Chapter = {
   id: 'unit-1',
@@ -39,6 +39,16 @@ describe('grounding helpers', () => {
   });
 });
 
+describe('cappedId', () => {
+  it('clamps to the pack id limit, trimming any trailing separator', () => {
+    expect(cappedId('a'.repeat(200)).length).toBe(128);
+    const cropped = cappedId(`${'a'.repeat(127)}-xyz`);
+    expect(cropped.length).toBeLessThanOrEqual(128);
+    expect(cropped.endsWith('-')).toBe(false);
+    expect(cappedId('short')).toBe('short');
+  });
+});
+
 describe('verifyExtraction', () => {
   it('keeps grounded concepts and assigns bare slugs', () => {
     const result = verify([
@@ -72,6 +82,31 @@ describe('verifyExtraction', () => {
       { term: 'Fraction', summary: 'part of a whole', excerpt: 'part of a whole' },
     ]);
     expect(result.healthy).toBe(false);
+  });
+
+  it('clamps very long objective ids to the schema limit', () => {
+    const longText = `Students ${'will be able to '.repeat(20)}understand numbers`;
+    const longChapter: Chapter = { ...chapter, markdown: `# Unit 1\n\n${longText}` };
+    const result = verifyExtraction(
+      longChapter,
+      {
+        concepts: [],
+        objectives: [{ statement: longText, excerpt: longText }],
+        examples: [],
+        prerequisites: [],
+      },
+      { usedConceptIds: new Set() },
+    );
+    const id = result.objectives[0]?.id ?? '';
+    expect(id.length).toBeLessThanOrEqual(128);
+    expect(id).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
+  });
+
+  it('clamps very long concept ids to the schema limit', () => {
+    const result = verify([
+      { term: 'A'.repeat(400), summary: 'part of a whole', excerpt: 'part of a whole' },
+    ]);
+    expect(result.concepts[0]?.id.length).toBeLessThanOrEqual(128);
   });
 
   it('assigns page numbers when the source carries form feeds', () => {

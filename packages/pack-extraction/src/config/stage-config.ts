@@ -58,6 +58,12 @@ export const PRICE_TABLE: Record<string, ModelPrice> = {
   'gemini-2.0-flash-001': { input: 0.1, output: 0.4 },
   'anthropic/claude-3.5-sonnet': { input: 3, output: 15 },
   'openai/gpt-4o-mini': { input: 0.15, output: 0.6 },
+  // Agnes AI list prices (OpenAI-compatible gateway). `agnes-2.5-flash` and
+  // `agnes-2.0-flash` are currently free under a promotion; list prices are used
+  // here so budget estimates stay conservative if the promotion ends.
+  'agnes-2.5-flash': { input: 0.05, output: 0.15 },
+  'agnes-2.0-flash': { input: 0.03, output: 0.15 },
+  'agnes-2.5-pro': { input: 0.45, output: 0.9 },
 };
 
 export const FALLBACK_PRICE: ModelPrice = { input: 2.5, output: 10 };
