@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeLlmClient, FailingLlmClient } from '../llm/fake.js';
-import type { LlmClient, LlmRequest } from '../llm/client.js';
+import type { LlmClient, LlmRequest, LlmResponse } from '../llm/client.js';
 import { orchestrate } from './orchestrate.js';
 import { resolveTierConfig } from '../config/stage-config.js';
 import type { SourceManifest } from '../ingest/types.js';
@@ -144,5 +144,34 @@ describe('orchestrate (two chapters, fake LLM)', () => {
     expect(report.chapters).toHaveLength(2);
     expect(report.totals.estimatedCostUsd).toBeGreaterThan(0);
     expect(existsSync(join(workingDir, 'review', 'run-report.json'))).toBe(true);
+    // Dry-run is a pure plan: no source copies, chapter model, cache, or packs.
+    expect(existsSync(join(workingDir, 'source-model', 'chapters.json'))).toBe(false);
+    expect(existsSync(join(workingDir, 'source'))).toBe(false);
+    expect(existsSync(join(workingDir, 'cache'))).toBe(false);
+    expect(existsSync(join(workingDir, 'packs'))).toBe(false);
+  });
+
+  it('retries transient call failures with backoff', async () => {
+    const workingDir = makeWorkingDir();
+    const inner = new FakeLlmClient((request: LlmRequest<never>) => fakeExtraction(request.prompt));
+    let attempts = 0;
+    const flaky: LlmClient = {
+      async generateStructured<T>(request: LlmRequest<T>): Promise<LlmResponse<T>> {
+        attempts += 1;
+        if (attempts <= 2) throw new Error('transient failure');
+        return inner.generateStructured(request);
+      },
+    };
+    const delays: number[] = [];
+    const { exitCode } = await orchestrate({
+      ...options(workingDir, flaky, 'force'),
+      retries: 3,
+      retryDelayMs: 10,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect(delays).toEqual([10, 20]);
   });
 });

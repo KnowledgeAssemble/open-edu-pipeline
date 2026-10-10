@@ -45,13 +45,15 @@ describe('applyMerge', () => {
     expect(result.resolution.get('unit-2--fraction')).toBe('fraction');
   });
 
-  it('excludes temporary ids that were never resolved', () => {
+  it('keeps unresolved temporary ids under a stable finalized id', () => {
     const concepts = [concept('fraction', 'unit-1'), concept('unit-2--fraction', 'unit-2')];
     const result = applyMerge({ concepts, result: undefined, chapterText });
-    expect(result.concepts.map((c) => c.id)).toEqual(['fraction']);
-    expect(result.mergeMap.excluded).toEqual([
-      { id: 'unit-2--fraction', reason: 'unresolved-temp-id' },
+    expect(result.concepts.map((c) => c.id)).toEqual(['fraction', 'unit-2-fraction']);
+    expect(result.mergeMap.finalized).toEqual([
+      { originalId: 'unit-2--fraction', id: 'unit-2-fraction' },
     ]);
+    expect([...result.unresolvedDuplicateIds]).toEqual(['unit-2-fraction']);
+    expect(result.resolution.get('unit-2--fraction')).toBe('unit-2-fraction');
   });
 
   it('keeps grounded prerequisite links', () => {

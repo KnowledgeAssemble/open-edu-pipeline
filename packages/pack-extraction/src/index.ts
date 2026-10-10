@@ -76,14 +76,19 @@ export type { CacheMeta, CacheUsage, CacheHit } from './cache/store.js';
 
 export {
   EXTRACT_PROMPT_VERSION,
+  EXTRACT_ESCALATION_PROMPT_VERSION,
   EXTRACT_SCHEMA_VERSION,
   MERGE_PROMPT_VERSION,
   MERGE_SCHEMA_VERSION,
+  CHAPTER_START_MARKER,
+  CHAPTER_END_MARKER,
   EXTRACT_STAGE,
   ESCALATION_STAGE,
   MERGE_STAGE,
   ChapterExtractionSchema,
   buildExtractPrompt,
+  buildEscalationPrompt,
+  sanitizeChapterText,
 } from './stages/extract.js';
 export type { ChapterExtraction } from './stages/extract.js';
 export { isGrounded, normalizeWs, stripMarkdown, verifyExtraction } from './stages/verify.js';

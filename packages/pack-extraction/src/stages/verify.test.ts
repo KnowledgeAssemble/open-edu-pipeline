@@ -19,7 +19,7 @@ function verify(concepts: Array<{ term: string; summary: string; excerpt: string
   return verifyExtraction(
     chapter,
     { concepts, objectives: [], examples: [], prerequisites: [] },
-    { documentId: 'demo', usedConceptIds: new Set() },
+    { usedConceptIds: new Set() },
   );
 }
 
@@ -87,7 +87,7 @@ describe('verifyExtraction', () => {
         examples: [],
         prerequisites: [],
       },
-      { documentId: 'demo', usedConceptIds: new Set() },
+      { usedConceptIds: new Set() },
     );
     expect(result.concepts[0]?.page).toBe(2);
   });

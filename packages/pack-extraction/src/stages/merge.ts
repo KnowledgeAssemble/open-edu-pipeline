@@ -32,7 +32,7 @@ export interface MergeConceptSummary {
 
 export interface MergeMap {
   clusters: Array<{ canonicalId: string; mergedIds: string[] }>;
-  excluded: Array<{ id: string; reason: string }>;
+  finalized: Array<{ originalId: string; id: string }>;
 }
 
 export interface UnresolvedPrereq {
@@ -54,6 +54,8 @@ export interface MergeApplyResult {
   mergeMap: MergeMap;
   unresolvedPrereqs: UnresolvedPrereq[];
   resolution: Map<string, string>;
+  /** Final ids for unresolved duplicates (kept in the knowledge pack, excluded from curriculum). */
+  unresolvedDuplicateIds: Set<string>;
 }
 
 export function compactSummary(concepts: VerifiedConcept[]): MergeConceptSummary[] {
@@ -90,9 +92,20 @@ function createsCycle(edges: Map<string, Set<string>>, from: string, to: string)
   return false;
 }
 
+function uniqueId(base: string, used: Set<string>): string {
+  let id = base || 'concept';
+  let suffix = 2;
+  while (used.has(id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  used.add(id);
+  return id;
+}
+
 export function applyMerge(input: MergeApplyInput): MergeApplyResult {
   const byId = new Map(input.concepts.map((concept) => [concept.id, concept]));
-  const mergeMap: MergeMap = { clusters: [], excluded: [] };
+  const mergeMap: MergeMap = { clusters: [], finalized: [] };
   const unresolvedPrereqs: UnresolvedPrereq[] = [];
   const redirect = new Map<string, string>();
 
@@ -119,7 +132,7 @@ export function applyMerge(input: MergeApplyInput): MergeApplyResult {
     }
   }
 
-  const resolve = (id: string): string => {
+  const resolveCluster = (id: string): string => {
     let current = id;
     const seen = new Set<string>();
     while (redirect.has(current) && !seen.has(current)) {
@@ -129,21 +142,39 @@ export function applyMerge(input: MergeApplyInput): MergeApplyResult {
     return current;
   };
 
-  const concepts = input.concepts.filter((concept) => {
-    if (resolve(concept.id) !== concept.id) return false;
-    if (concept.id.includes('--')) {
-      mergeMap.excluded.push({ id: concept.id, reason: 'unresolved-temp-id' });
-      return false;
-    }
-    return true;
-  });
-
-  const idSet = new Set(concepts.map((concept) => concept.id));
+  // Finalize ids. Duplicates the model clustered collapse into their canonical id;
+  // unresolved temporary ids (chapter-scoped duplicates the merge missed) are KEPT
+  // under a stable, pack-legal id rather than silently dropped.
+  const used = new Set<string>();
   const resolution = new Map<string, string>();
-  for (const concept of input.concepts) {
-    const canonical = resolve(concept.id);
-    if (idSet.has(canonical)) resolution.set(concept.id, canonical);
+  const unresolvedDuplicateIds = new Set<string>();
+  const concepts: VerifiedConcept[] = [];
+  const ordered = [
+    ...input.concepts.filter((concept) => !concept.id.includes('--')),
+    ...input.concepts.filter((concept) => concept.id.includes('--')),
+  ];
+  for (const concept of ordered) {
+    const canonical = resolveCluster(concept.id);
+    if (canonical !== concept.id) {
+      resolution.set(concept.id, canonical);
+      continue;
+    }
+    if (concept.id.includes('--')) {
+      const id = uniqueId(concept.id.replace(/--+/g, '-'), used);
+      mergeMap.finalized.push({ originalId: concept.id, id });
+      unresolvedDuplicateIds.add(id);
+      resolution.set(concept.id, id);
+      concepts.push({ ...concept, id });
+    } else {
+      const id = uniqueId(concept.id, used);
+      resolution.set(concept.id, id);
+      concepts.push(id === concept.id ? concept : { ...concept, id });
+    }
   }
+
+  const finalById = new Map(concepts.map((concept) => [concept.id, concept]));
+  const idSet = new Set(finalById.keys());
+  const resolveFinal = (id: string): string => resolution.get(id) ?? resolveCluster(id);
 
   const edges = new Map<string, Set<string>>();
   const prerequisites: Array<{ fromId: string; toId: string }> = [];
@@ -151,8 +182,8 @@ export function applyMerge(input: MergeApplyInput): MergeApplyResult {
 
   if (input.result) {
     for (const link of input.result.prerequisiteLinks) {
-      const fromId = resolve(link.fromId);
-      const toId = resolve(link.toId);
+      const fromId = resolveFinal(link.fromId);
+      const toId = resolveFinal(link.toId);
       if (!idSet.has(fromId) || !idSet.has(toId)) {
         unresolvedPrereqs.push({
           fromId: link.fromId,
@@ -171,8 +202,8 @@ export function applyMerge(input: MergeApplyInput): MergeApplyResult {
         });
         continue;
       }
-      const fromChapter = byId.get(fromId)?.chapterId;
-      const toChapter = byId.get(toId)?.chapterId;
+      const fromChapter = finalById.get(fromId)?.chapterId;
+      const toChapter = finalById.get(toId)?.chapterId;
       const grounded = [fromChapter, toChapter].some((chapterId) => {
         if (!chapterId) return false;
         const text = input.chapterText.get(chapterId);
@@ -206,5 +237,12 @@ export function applyMerge(input: MergeApplyInput): MergeApplyResult {
     }
   }
 
-  return { concepts, prerequisites, mergeMap, unresolvedPrereqs, resolution };
+  return {
+    concepts,
+    prerequisites,
+    mergeMap,
+    unresolvedPrereqs,
+    resolution,
+    unresolvedDuplicateIds,
+  };
 }

@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import type { LlmStage, ModelTier } from '@open-edu/pipeline-llm';
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
 import { CurriculumSchema } from '../schemas/index.js';
+import type { GlossaryCandidate } from '../knowledge/types.js';
 import { writeJson, emitKnowledgePack, emitCurriculumPack } from '../emit/write.js';
 import { validateKnowledgePack, validateCurriculumPack } from '../validate/pack.js';
 import type { PackResult } from '../validate/pack.js';
@@ -15,6 +16,7 @@ import type { Chapter } from '../chapters/types.js';
 import type { LlmClient } from '../llm/client.js';
 import {
   EXTRACT_PROMPT_VERSION,
+  EXTRACT_ESCALATION_PROMPT_VERSION,
   EXTRACT_SCHEMA_VERSION,
   MERGE_PROMPT_VERSION,
   MERGE_SCHEMA_VERSION,
@@ -23,6 +25,7 @@ import {
   MERGE_STAGE,
   ChapterExtractionSchema,
   buildExtractPrompt,
+  buildEscalationPrompt,
 } from '../stages/extract.js';
 import type { ChapterExtraction } from '../stages/extract.js';
 import { verifyExtraction } from '../stages/verify.js';
@@ -67,9 +70,15 @@ export interface OrchestrateOptions {
   chapterHeading?: RegExp;
   allowPartial: boolean;
   validate: boolean;
+  retries?: number;
+  retryDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
   log?: (message: string) => void;
 }
+
+const DEFAULT_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 500;
 
 export interface OrchestrateResult {
   exitCode: number;
@@ -91,6 +100,37 @@ interface CallContext {
   budget: BudgetGuard;
   force: boolean;
   now: () => Date;
+  retries: number;
+  retryDelayMs: number;
+  sleep: (ms: number) => Promise<void>;
+  stats: { cacheHits: number };
+  log: (message: string) => void;
+}
+
+/**
+ * Bounded exponential backoff around a single provider call. `@open-edu/pipeline-llm`
+ * exposes no retry (only the OpenAI SDK's default), so transient provider/network
+ * failures are retried here; the SDK's own retries still apply underneath.
+ */
+async function withRetry<T>(
+  run: () => Promise<T>,
+  ctx: Pick<CallContext, 'retries' | 'retryDelayMs' | 'sleep' | 'log'>,
+  stage: LlmStage,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= ctx.retries; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= ctx.retries) break;
+      const delay = ctx.retryDelayMs * 2 ** attempt;
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.log(`retry ${attempt + 1}/${ctx.retries} for stage "${stage}" in ${delay}ms: ${message}`);
+      await ctx.sleep(delay);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function callStructured<T>(args: {
@@ -114,6 +154,7 @@ async function callStructured<T>(args: {
   if (!args.ctx.force) {
     const hit = args.ctx.cache.get<T>(args.stage, args.cacheId, key);
     if (hit) {
+      args.ctx.stats.cacheHits += 1;
       return {
         data: hit.value,
         cacheHit: true,
@@ -129,13 +170,18 @@ async function callStructured<T>(args: {
     );
   }
 
-  const response = await args.ctx.client.generateStructured({
-    stage: args.stage,
-    tier: args.tier,
-    prompt: args.prompt,
-    schema: args.schema,
-    temperature: 0,
-  });
+  const response = await withRetry(
+    () =>
+      args.ctx.client.generateStructured({
+        stage: args.stage,
+        tier: args.tier,
+        prompt: args.prompt,
+        schema: args.schema,
+        temperature: 0,
+      }),
+    args.ctx,
+    args.stage,
+  );
 
   const outputTokens = estimateTokens(JSON.stringify(response.data));
   const usage: CallEstimate = {
@@ -178,7 +224,11 @@ function commitIds(target: Set<string>, source: Set<string>): void {
   for (const id of source) target.add(id);
 }
 
-function selectChapters(chapters: Chapter[], spec: string | undefined): Chapter[] {
+function selectChapters(
+  chapters: Chapter[],
+  spec: string | undefined,
+  log: (message: string) => void = () => {},
+): Chapter[] {
   if (!spec) return chapters;
   const selected: Chapter[] = [];
   const parts = spec
@@ -192,13 +242,22 @@ function selectChapters(chapters: Chapter[], spec: string | undefined): Chapter[
       const endIndex = chapters.findIndex((chapter) => chapter.id === range[1]);
       if (startIndex >= 0 && endIndex >= startIndex) {
         selected.push(...chapters.slice(startIndex, endIndex + 1));
+      } else {
+        log(`--chapters: no chapter range matched "${part}"`);
       }
       continue;
     }
     const match = chapters.find(
       (chapter) => chapter.id === part || chapter.id.startsWith(`${part}-`),
     );
-    if (match) selected.push(match);
+    if (match) {
+      selected.push(match);
+    } else {
+      log(`--chapters: no chapter matched "${part}"`);
+    }
+  }
+  if (selected.length === 0) {
+    log(`--chapters: no chapters matched "${spec}"; nothing to do`);
   }
   return [...new Set(selected)];
 }
@@ -216,10 +275,7 @@ async function processChapter(args: {
   const { chapter, manifest, usedConceptIds } = args;
   const detExtraction = deterministicExtraction(chapter, manifest);
   const detTrial = new Set(usedConceptIds);
-  const detVerify = verifyExtraction(chapter, detExtraction, {
-    documentId: manifest.id,
-    usedConceptIds: detTrial,
-  });
+  const detVerify = verifyExtraction(chapter, detExtraction, { usedConceptIds: detTrial });
   const detSufficient = detVerify.concepts.length >= 1 && detVerify.objectives.length >= 1;
   const llmAllowed = args.llmMode !== 'off' && args.client !== undefined;
   const wantLlm = llmAllowed && (!detSufficient || args.llmMode === 'force');
@@ -275,22 +331,20 @@ async function processChapter(args: {
   report.estimatedCostUsd += call.usage.costUsd;
 
   const fastTrial = new Set(usedConceptIds);
-  let verify = verifyExtraction(chapter, call.data, {
-    documentId: manifest.id,
-    usedConceptIds: fastTrial,
-  });
+  let verify = verifyExtraction(chapter, call.data, { usedConceptIds: fastTrial });
 
   if (!shouldEscalate(verify)) {
     commitIds(usedConceptIds, fastTrial);
   } else {
+    const failures = verify.rejections.map((rejection) => `${rejection.reason}: ${rejection.item}`);
     const escalated = await callStructured({
       ctx: args.ctx,
       stage: ESCALATION_STAGE,
       tier: 'escalation',
       cacheId: chapter.id,
-      prompt: buildExtractPrompt(chapter),
+      prompt: buildEscalationPrompt(chapter, failures),
       schema: ChapterExtractionSchema,
-      promptVersion: EXTRACT_PROMPT_VERSION,
+      promptVersion: EXTRACT_ESCALATION_PROMPT_VERSION,
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       model: args.tierConfig.escalation,
     });
@@ -299,10 +353,7 @@ async function processChapter(args: {
     report.estimatedOutputTokens += escalated.usage.outputTokens;
     report.estimatedCostUsd += escalated.usage.costUsd;
     const escalationTrial = new Set(usedConceptIds);
-    verify = verifyExtraction(chapter, escalated.data, {
-      documentId: manifest.id,
-      usedConceptIds: escalationTrial,
-    });
+    verify = verifyExtraction(chapter, escalated.data, { usedConceptIds: escalationTrial });
     commitIds(usedConceptIds, escalationTrial);
   }
 
@@ -374,13 +425,14 @@ function buildCurriculum(
   runs: ChapterRun[],
   concepts: VerifiedConcept[],
   resolution: Map<string, string>,
+  excludeIds: Set<string>,
   options: OrchestrateOptions,
 ): Curriculum | undefined {
   const units: Curriculum['units'] = [];
   for (const run of runs) {
     if (run.objectives.length === 0) continue;
     const chapterConceptIds = concepts
-      .filter((concept) => concept.chapterId === run.chapter.id)
+      .filter((concept) => concept.chapterId === run.chapter.id && !excludeIds.has(concept.id))
       .map((concept) => concept.id);
 
     const objectives = run.objectives.map((objective) => {
@@ -431,29 +483,15 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   const log = options.log ?? (() => {});
   const { manifest, workingDir } = options;
 
-  mkdirSync(join(workingDir, 'source'), { recursive: true });
-  options.writeSource(join(workingDir, 'source'));
-
   const doc = parseMarkdown(options.markdown);
   doc.document.id = manifest.id;
-  writeJson(join(workingDir, 'source-model', 'source-model.json'), doc);
 
   const segmentation = segmentChapters(options.markdown, {
     tocPages: options.tocPages,
     chapterHeading: options.chapterHeading,
   });
-  writeJson(join(workingDir, 'source-model', 'chapters.json'), {
-    chapters: segmentation.chapters.map((chapter) => ({
-      id: chapter.id,
-      title: chapter.title,
-      pageStart: chapter.pageStart,
-      pageEnd: chapter.pageEnd,
-      sha256: chapter.sha256,
-      markdown: chapter.markdown,
-    })),
-  });
 
-  const selected = selectChapters(segmentation.chapters, options.chapters);
+  const selected = selectChapters(segmentation.chapters, options.chapters, log);
 
   const report: RunReport = {
     generatedAt: now().toISOString(),
@@ -475,9 +513,8 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     exitCode: 0,
   };
 
-  const cache = new CacheStore(join(workingDir, 'cache', 'llm'));
-  const budget = new BudgetGuard(options.maxBudgetUsd);
-
+  // Dry-run is a pure plan: no source copies, cache, calls, or packs — only the
+  // report under review/. Per-chapter estimate is worst-case (fast + escalation).
   if (options.dryRun) {
     for (const chapter of selected) {
       const prompt = buildExtractPrompt(chapter);
@@ -498,8 +535,8 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
         objectives: 0,
         rejections: 0,
         pendingHuman: false,
-        estimatedInputTokens: fastEstimate.inputTokens,
-        estimatedOutputTokens: fastEstimate.outputTokens,
+        estimatedInputTokens: fastEstimate.inputTokens + escalationEstimate.inputTokens,
+        estimatedOutputTokens: fastEstimate.outputTokens + escalationEstimate.outputTokens,
         estimatedCostUsd: fastEstimate.costUsd + escalationEstimate.costUsd,
       };
       report.chapters.push(chapterReport);
@@ -513,12 +550,36 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     return { exitCode: 0, report };
   }
 
+  mkdirSync(join(workingDir, 'source'), { recursive: true });
+  options.writeSource(join(workingDir, 'source'));
+  writeJson(join(workingDir, 'source-model', 'source-model.json'), doc);
+  writeJson(join(workingDir, 'source-model', 'chapters.json'), {
+    chapters: segmentation.chapters.map((chapter) => ({
+      id: chapter.id,
+      title: chapter.title,
+      pageStart: chapter.pageStart,
+      pageEnd: chapter.pageEnd,
+      sha256: chapter.sha256,
+      markdown: chapter.markdown,
+    })),
+  });
+
+  const cache = new CacheStore(join(workingDir, 'cache', 'llm'));
+  const budget = new BudgetGuard(options.maxBudgetUsd);
+  const stats = { cacheHits: 0 };
+
   const ctx: CallContext = {
     client: options.llmClient as LlmClient,
     cache,
     budget,
     force: options.force,
     now,
+    retries: options.retries ?? DEFAULT_RETRIES,
+    retryDelayMs: options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
+    sleep:
+      options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    stats,
+    log,
   };
 
   const usedConceptIds = new Set<string>();
@@ -555,7 +616,6 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   for (const run of runs) writeChapterReview(workingDir, run);
   report.spentUsd = budget.spentUsd;
   report.escalations = runs.filter((run) => run.report.escalated).length;
-  report.cacheHits = runs.filter((run) => run.report.cacheHit).length;
   report.pendingHuman = runs.filter((run) => run.pendingHuman).map((run) => run.chapter.id);
 
   for (const run of runs) {
@@ -573,9 +633,10 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   let merge: MergeApplyResult = {
     concepts: allConcepts,
     prerequisites: [],
-    mergeMap: { clusters: [], excluded: [] },
+    mergeMap: { clusters: [], finalized: [] },
     unresolvedPrereqs: [],
     resolution: new Map(allConcepts.map((concept) => [concept.id, concept.id])),
+    unresolvedDuplicateIds: new Set(),
   };
 
   const canMerge =
@@ -609,6 +670,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   }
 
   report.spentUsd = budget.spentUsd;
+  report.cacheHits = stats.cacheHits;
   report.totals.concepts = merge.concepts.length;
   report.totals.objectives = allObjectives.length;
 
@@ -620,11 +682,31 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     concepts: merge.concepts,
     objectives: allObjectives,
   });
-  writeJson(join(reviewDir, 'glossary-candidates.json'), []);
+  const seenTerms = new Set<string>();
+  const glossary: GlossaryCandidate[] = [];
+  for (const concept of merge.concepts) {
+    const term = concept.term.trim();
+    const key = term.toLowerCase();
+    if (term === '' || seenTerms.has(key)) continue;
+    seenTerms.add(key);
+    const source: GlossaryCandidate['source'] = {
+      documentId: manifest.id,
+      section: concept.chapterId,
+    };
+    if (concept.page !== undefined) source.page = concept.page;
+    glossary.push({ term, definition: concept.summary, conceptId: concept.id, source });
+  }
+  writeJson(join(reviewDir, 'glossary-candidates.json'), glossary);
   writeJson(join(reviewDir, 'merge-map.json'), merge.mergeMap);
   writeJson(join(reviewDir, 'unresolved-prereqs.json'), { links: merge.unresolvedPrereqs });
 
-  const curriculum = buildCurriculum(runs, merge.concepts, merge.resolution, options);
+  const curriculum = buildCurriculum(
+    runs,
+    merge.concepts,
+    merge.resolution,
+    merge.unresolvedDuplicateIds,
+    options,
+  );
   writeJson(join(reviewDir, 'curriculum-model.json'), curriculum ?? null);
 
   const knowledgeManifest: PackManifest = {
@@ -680,18 +762,21 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     });
   }
 
-  const knowledgeResult = validateKnowledgePack(dirname(knowledgePack.paths[0] ?? ''));
-  let curriculumResult: PackResult = { ok: true, report: [] };
-  if (curriculumPackPaths.length > 0) {
-    const knowledgeConceptIds = new Set(conceptDocs.map((concept) => concept.id));
-    curriculumResult = validateCurriculumPack(
-      dirname(curriculumPackPaths[0] ?? ''),
-      options.knowledgePackId,
-      knowledgeConceptIds,
-    );
+  let packsValid = true;
+  if (options.validate) {
+    const knowledgeResult = validateKnowledgePack(dirname(knowledgePack.paths[0] ?? ''));
+    let curriculumResult: PackResult = { ok: true, report: [] };
+    if (curriculumPackPaths.length > 0) {
+      const knowledgeConceptIds = new Set(conceptDocs.map((concept) => concept.id));
+      curriculumResult = validateCurriculumPack(
+        dirname(curriculumPackPaths[0] ?? ''),
+        options.knowledgePackId,
+        knowledgeConceptIds,
+      );
+    }
+    packsValid = knowledgeResult.ok && curriculumResult.ok;
   }
 
-  const packsValid = knowledgeResult.ok && curriculumResult.ok;
   const anyLlmUsed = runs.some((run) => run.report.usedLlm);
 
   writeJson(join(reviewDir, 'fidelity-report.json'), {

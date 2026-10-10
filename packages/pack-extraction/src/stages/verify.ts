@@ -38,7 +38,6 @@ export interface VerifyChapterResult {
 }
 
 export interface VerifyOptions {
-  documentId: string;
   usedConceptIds: Set<string>;
 }
 
