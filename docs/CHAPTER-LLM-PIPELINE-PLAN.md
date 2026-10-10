@@ -8,7 +8,7 @@ Status: **plan only — no code yet.**
 
 Turn a real textbook PDF (pilot: NIOS Mathematics Level A) into validated knowledge + curriculum packs by combining deterministic parsing/segmentation with **LLM-assisted extraction at chapter scope**, at a token cost of well under $1 per full first run and ≈ $0 for re-runs.
 
-Chosen approach (of three considered — chapter-map single-tier, chapter-map + escalation, page-window map-reduce): **chapter-map + escalation**. One cheap-tier structured call per chapter; deterministic excerpt-grounded verification; escalate only demonstrably failed chapters to a stronger model once; cross-chapter merge over compact JSON only.
+Chosen approach (of three considered — chapter-map single-tier, chapter-map + escalation, page-window map-reduce): **chapter-map + escalation**. One **fast-tier** structured call per chapter; deterministic excerpt-grounded verification; escalate only demonstrably failed chapters to the **escalation tier** once; cross-chapter merge over compact JSON only. Tiers use pipeline-llm's `ModelTier` vocabulary (`fast` | `escalation`).
 
 Why not page-window map-reduce: worse provenance (window, not section/page), more merge ambiguity, ~2–3× calls. Why not single-tier: failed messy chapters would need manual re-runs; escalation is a small retry-on-validation-failure mechanism.
 
@@ -29,9 +29,9 @@ Inter-stage data is JSON in the working directory — inspectable, resumable, ca
 ```
 Stage 0  deterministic    PDF → markdown (liteparse) + page map (form-feed split, best-effort)
 Stage 1  deterministic    boilerplate strip + TOC-driven chapter segmentation → chapters.json
-Stage 2  LLM, per chapter one structured call on the cheap tier (auto/forced only)
+Stage 2  LLM, per chapter one structured call on the fast tier (auto/forced only)
 Stage 3  deterministic    verify (zod) + excerpt-grounding + ids + provenance + curriculum assembly
-Stage 4  LLM escalation   one retry on a stronger model, only for chapters that failed Stage 3
+Stage 4  LLM escalation   one retry on the escalation tier, only for chapters that failed Stage 3
 Stage 5  LLM, compact     cross-chapter dedup + prerequisite links over compact JSON only
 Stage 6  deterministic   merge apply + emit packs + validate + review stream + run report
 ```
@@ -40,15 +40,21 @@ Stage 6  deterministic   merge apply + emit packs + validate + review stream + r
 
 `@open-edu/pipeline-llm` exposes a fixed stage set (`LLM_STAGES`, 7 values) and must not be modified. Our logical stages therefore alias onto existing stages, and provider/model are overridden via `LlmRouter.updateStageConfig`. No new stage names are invented.
 
-| Plan stage | `LlmStage` used | Tier |
+| Plan stage | `LlmStage` used | `ModelTier` |
 | --- | --- | --- |
-| Stage 2 extraction | `concept_map` | cheap |
-| Stage 4 escalation | `concept_enrichment` | strong |
-| Stage 5 merge | `review` | cheap |
+| Stage 2 extraction | `concept_map` | `fast` |
+| Stage 4 escalation | `concept_enrichment` | `escalation` |
+| Stage 5 merge | `review` | `fast` |
 
 ### Token usage caveat
 
 `LlmProvider.generateStructured` returns only the parsed value (`T`); `StructuredResult` carries no token counts. Without modifying pipeline-llm (forbidden) we cannot read actual usage. **All cost figures in this plan — the budget guard and `run-report.json` — are estimates** (chars/4 × configured prices).
+
+### What is reused vs new
+
+- **Reused** from `@open-edu/pipeline-llm`: provider implementations (OpenAI/OpenRouter) and zod structured output (`zodResponseFormat`, plus OpenRouter's `json_object` fallback); `loadConfig`; `LlmRouter` + `updateStageConfig`; and the `ModelTier` (`fast` | `escalation`) + `LLM_FAST_MODEL` / `LLM_ESCALATION_MODEL` convention used for tier selection.
+- **New here** (pipeline-llm has no such capability, and it must not be modified): retry/backoff, per-chapter response cache + resume, cost estimation / budget guard, escalation decision logic, chapter segmentation / orchestration / prompts, and the `LlmClient` test seam.
+- Caveat: pipeline-llm ships two parallel LLM paths — `LlmRouter`/`LlmProvider` (what we use) and the AI-SDK `ModelFactory` where `ModelTier` is actually defined. We reuse the tier **vocabulary and env vars**, but drive calls through `LlmRouter`, so we cannot consume `ModelFactory` directly without switching abstraction.
 
 ## 3. Stage details
 
@@ -133,7 +139,7 @@ Emission guard: `CurriculumUnitSchema` requires ≥1 objective per unit and ≥1
 ## 5. Cost controls
 
 1. **Chapter scope** — whole book never sent; boilerplate stripped first.
-2. **Cheap default tier** — model per stage in `stage-config.ts` (mini/flash-class via openrouter, or `gpt-4o-mini`); `--model`/`--provider` override; separate `--escalation-model`.
+2. **Fast default tier** — extraction defaults to the `fast` `ModelTier` (mini/flash-class via openrouter, or `gpt-4o-mini`), resolved in `stage-config.ts` and honoring `LLM_FAST_MODEL`; `--fast-model`/`--provider` override it. The `escalation` tier is resolved the same way and honors `LLM_ESCALATION_MODEL` / `--escalation-model`.
 3. **One call per chapter** — no conversation, temperature 0, structured output.
 4. **Escalation only on demonstrated failure** — premium tokens never spent blanket.
 5. **Compact merge** — Stage 5 sees summaries, not raw text.
@@ -141,7 +147,7 @@ Emission guard: `CurriculumUnitSchema` requires ≥1 objective per unit and ≥1
 7. **Budget guard (estimates only)** — `--max-budget-usd` (default 2.0). Because pipeline-llm surfaces no token usage, the guard uses **estimates**: price table (per-1M-token in/out, USD) in `stage-config.ts`, keyed by the configured model names. Before each call: `projected = spentEstimate + estimate(next)`, `estimate = tokensIn × priceIn + tokensOut × priceOut`, `tokens ≈ chars/4`. Exceeding → clean abort, partial state kept, resume free. Estimates are treated as conservative upper bounds.
 8. **Observable spend (estimated)** — `review/run-report.json`: per-stage/per-chapter estimated tokens and cost, cache hits, escalations, rejections, pending-human list. Every figure is labeled an estimate, never presented as a billed amount.
 9. **`--dry-run`** — chapter plan + per-chapter token estimates + total projected cost; zero calls.
-10. **Explicit tier override** — `LlmRouter` reads provider/model from its own stage config, whose defaults are `gpt-5.4` / `gpt-5.4-mini`. The adapter must call `updateStageConfig` with the cheap extraction tier (and, on escalation, the strong tier) before any call so the "cheap default" actually holds. Both tiers are overridable via `--provider` / `--model` / `--escalation-model`.
+10. **Explicit tier override** — `LlmRouter` reads provider/model from its own stage config, whose defaults are `gpt-5.4` / `gpt-5.4-mini`. The adapter must call `updateStageConfig` with the resolved `fast` model (and, on escalation, the `escalation` model) before any call so the fast default actually holds. Tiers follow pipeline-llm's `ModelTier` naming and env vars (`LLM_FAST_MODEL` / `LLM_ESCALATION_MODEL`), overridable via `--provider` / `--fast-model` / `--escalation-model`. Because the `ModelTier` helpers live on pipeline-llm's AI-SDK `ModelFactory` path (not the `LlmRouter` path we use), we reuse the naming/env convention rather than the factory itself.
 
 Pilot math (NIOS Math Level A, ~25 chapters): ~4k in + ~1.5k out per chapter ≈ 140k tokens on a mini-class model → **under $0.50 first run**; re-runs ≈ $0.
 
@@ -152,7 +158,7 @@ Pilot math (NIOS Math Level A, ~25 chapters): ~4k in + ~1.5k out per chapter ≈
 | Flag | Meaning |
 | --- | --- |
 | `--llm` / `--no-llm` | force LLM for all chapters / forbid LLM. Default **auto**: LLM for any chapter whose deterministic result is insufficient for the pack schema — i.e. it has <1 concept OR <1 grounded objective (not merely "both zero") |
-| `--provider`, `--model`, `--escalation-model` | tier overrides |
+| `--provider`, `--fast-model`, `--escalation-model` | tier overrides; also honor `LLM_FAST_MODEL` / `LLM_ESCALATION_MODEL` |
 | `--max-budget-usd <n>` | budget guard (default 2.0) |
 | `--dry-run` | plan + cost estimate, no calls |
 | `--force` | bust cache |
@@ -176,7 +182,7 @@ Exit codes: `0` when the emitted packs validate, at least one curriculum unit ex
 
 ## 7. Error handling
 
-- Provider/network failure → retry with backoff (pipeline-llm) → Stage 4 escalation → `pending-human`; one chapter never kills the run.
+- Provider/network failure → limited retries with backoff implemented in our orchestration, then Stage 4 escalation → `pending-human`; one chapter never kills the run. (pipeline-llm provides **no** retry; its OpenAI-SDK calls do still get the SDK's default transient retries.)
 - Grounding rejection → item dropped, logged with excerpt + reason; never silently kept.
 - Unresolved refs → review flags, never invented.
 - Budget exceeded / interrupt → clean abort; completed chapters stay cached; resume is free.
