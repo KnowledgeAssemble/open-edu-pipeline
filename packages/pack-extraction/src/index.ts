@@ -91,7 +91,14 @@ export {
   sanitizeChapterText,
 } from './stages/extract.js';
 export type { ChapterExtraction } from './stages/extract.js';
-export { isGrounded, normalizeWs, stripMarkdown, verifyExtraction } from './stages/verify.js';
+export {
+  cappedId,
+  MAX_ID_LENGTH,
+  isGrounded,
+  normalizeWs,
+  stripMarkdown,
+  verifyExtraction,
+} from './stages/verify.js';
 export { shouldEscalate } from './stages/escalate.js';
 export type {
   VerifiedConcept,

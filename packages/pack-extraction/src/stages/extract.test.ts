@@ -30,6 +30,12 @@ describe('extract prompts', () => {
     expect(prompt).toContain('schema: objective');
   });
 
+  it('requires single contiguous verbatim excerpts', () => {
+    const prompt = buildExtractPrompt({ title: 'T', markdown: 'body' });
+    expect(prompt).toContain('single contiguous run');
+    expect(prompt).toContain('Never join text from different lines');
+  });
+
   it('omits the failure block when there are no failures', () => {
     const prompt = buildEscalationPrompt({ title: 'T', markdown: 'body' }, []);
     expect(prompt).not.toContain('rejected by a deterministic verifier');

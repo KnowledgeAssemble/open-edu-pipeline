@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { LlmStage } from '@open-edu/pipeline-llm';
 
-export const EXTRACT_PROMPT_VERSION = '1';
-export const EXTRACT_ESCALATION_PROMPT_VERSION = '1';
+export const EXTRACT_PROMPT_VERSION = '2';
+export const EXTRACT_ESCALATION_PROMPT_VERSION = '2';
 export const EXTRACT_SCHEMA_VERSION = '1';
 export const MERGE_PROMPT_VERSION = '1';
 export const MERGE_SCHEMA_VERSION = '1';
@@ -52,12 +52,14 @@ const SYSTEM_RULES = [
   'You extract source-grounded knowledge from one textbook chapter.',
   'Rules:',
   '1. Every "excerpt" MUST be copied verbatim from the provided chapter text.',
-  '2. Do not invent terms that do not appear in the chapter.',
-  '3. Do not normalize or correct spelling; copy the source spelling.',
-  '4. Do not add Bloom levels or pedagogical commentary.',
-  '5. Empty arrays are valid answers when the chapter contains nothing of that kind.',
-  '6. Keep each excerpt under 600 characters.',
-  '7. Respond with JSON only, matching the requested schema.',
+  '2. Each excerpt MUST be a single contiguous run of characters copied from ONE place in the chapter. Never join text from different lines, bullet points, table cells, or paragraphs.',
+  '3. Do not add, remove, or alter bullets, list markers, symbols, punctuation, or capitalization. Copy them exactly as they appear.',
+  '4. Do not invent terms that do not appear in the chapter.',
+  '5. Do not normalize or correct spelling; copy the source spelling.',
+  '6. Do not add Bloom levels or pedagogical commentary.',
+  '7. Empty arrays are valid answers when the chapter contains nothing of that kind.',
+  '8. Keep each excerpt under 600 characters.',
+  '9. Respond with JSON only, matching the requested schema.',
 ].join('\n');
 
 /** Neutralize the chapter fences so source text cannot break the prompt structure. */

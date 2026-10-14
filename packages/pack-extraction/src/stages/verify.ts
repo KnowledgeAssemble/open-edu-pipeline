@@ -41,21 +41,46 @@ export interface VerifyOptions {
   usedConceptIds: Set<string>;
 }
 
+/** Max id length allowed by the pack schemas (`ConceptSchema`); objectives/units share it. */
+export const MAX_ID_LENGTH = 128;
+
+/** Room reserved for a `-N` dedup suffix so a capped base can never overflow. */
+const ID_SUFFIX_BUDGET = 12;
+
+/** Clamp a slug to the pack id limit, trimming any separator left by the cut. */
+export function cappedId(value: string, max = MAX_ID_LENGTH): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max).replace(/[-_]+$/, '');
+  return cut === '' ? value.slice(0, max) : cut;
+}
+
 export function normalizeWs(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+const LIST_MARKER_RE = /^\s*(?:[-*+•]|\d+[.)])\s+/;
+const SEPARATOR_LINE_RE = /^[\s:._-]*$/;
+
+/** Strip markdown structure — headings, emphasis, table pipes, list/bullet markers,
+ * and separator rows — so formatting differences do not break verbatim matching. */
 export function stripMarkdown(markdown: string): string {
   return markdown
     .split('\n')
-    .map((line) => line.replace(/^\s*#{1,6}\s*/, '').replace(/[*_`|]/g, ''))
+    .map((line) =>
+      line
+        .replace(/^\s*#{1,6}\s*/, '')
+        .replace(LIST_MARKER_RE, '')
+        .replace(/[*_`|•]/g, ''),
+    )
+    .filter((line) => !SEPARATOR_LINE_RE.test(line))
     .join('\n');
 }
 
-/** Accept an excerpt when it is a whitespace-normalized substring of either the
- * raw chapter markdown or its markdown-stripped variant. */
+/** Accept an excerpt when it is a whitespace-normalized substring of the raw chapter
+ * markdown or its markdown-stripped variant. Both sides are normalized so list/bullet
+ * markers, table pipes, and line breaks don't cause false negatives. */
 export function isGrounded(excerpt: string, markdown: string): boolean {
-  const target = normalizeWs(excerpt);
+  const target = normalizeWs(stripMarkdown(excerpt));
   if (target === '') return false;
   return (
     normalizeWs(markdown).includes(target) || normalizeWs(stripMarkdown(markdown)).includes(target)
@@ -69,7 +94,7 @@ export function pageForExcerpt(
 ): number | undefined {
   if (!markdown.includes('\f')) return undefined;
   const pages = markdown.split(/\f/);
-  const target = normalizeWs(excerpt);
+  const target = normalizeWs(stripMarkdown(excerpt));
   if (target === '') return undefined;
   for (let index = 0; index < pages.length; index += 1) {
     const page = pages[index] ?? '';
@@ -101,7 +126,7 @@ export function verifyExtraction(
     const term = item.term.trim();
     const summary = item.summary.trim();
     const excerpt = item.excerpt.trim();
-    const slug = slugify(term);
+    const slug = cappedId(slugify(term));
     if (term === '' || summary === '' || excerpt === '' || slug === '') {
       rejections.push({ item: term || 'concept', reason: 'schema' });
       continue;
@@ -115,10 +140,11 @@ export function verifyExtraction(
     if (!options.usedConceptIds.has(slug)) {
       id = slug;
     } else {
-      id = `${chapter.id}--${slug}`;
+      const base = cappedId(`${chapter.id}--${slug}`, MAX_ID_LENGTH - ID_SUFFIX_BUDGET);
+      id = base;
       let suffix = 2;
       while (options.usedConceptIds.has(id)) {
-        id = `${chapter.id}--${slug}-${suffix}`;
+        id = `${base}-${suffix}`;
         suffix += 1;
       }
     }
@@ -153,7 +179,7 @@ export function verifyExtraction(
       continue;
     }
 
-    const base = slugify(statement) || 'objective';
+    const base = cappedId(slugify(statement) || 'objective', MAX_ID_LENGTH - ID_SUFFIX_BUDGET);
     let id = base;
     let suffix = 2;
     while (seenObjectiveIds.has(id)) {
