@@ -1,0 +1,39 @@
+{
+  "name": "@open-edu/pack-extraction",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source-grounded knowledge/curriculum pack extraction (vertical slice)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "pack-extract": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "extract": "node dist/cli/index.js",
+    "extract:slice": "node dist/cli/index.js --source ../../fixtures/nios-math-a/lesson-5-fractions.md --manifest ../../fixtures/nios-math-a/source-manifest.json --output ../../output --validate"
+  },
+  "dependencies": {
+    "@llamaindex/liteparse": "^2.8.0",
+    "@open-edu/pipeline-llm": "workspace:*",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}

@@ -16,7 +16,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "clean": "pnpm -r run clean",
-    "curriculum:generate": "pnpm --filter @open-edu/pipeline curriculum:generate"
+    "curriculum:generate": "pnpm --filter @open-edu/pipeline curriculum:generate",
+    "extract": "pnpm --filter @open-edu/pack-extraction extract",
+    "extract:slice": "pnpm --filter @open-edu/pack-extraction extract:slice"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
