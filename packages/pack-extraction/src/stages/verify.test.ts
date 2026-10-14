@@ -32,10 +32,35 @@ describe('grounding helpers', () => {
     expect(stripMarkdown('# Title\n**bold** `code`')).toBe('Title\nbold code');
   });
 
+  it('strips list markers and separator rows', () => {
+    expect(stripMarkdown('- apple\n1. pear')).toBe('apple\npear');
+    expect(stripMarkdown('| a | b |\n|---|---|')).not.toContain('---');
+  });
+
   it('accepts verbatim excerpts and rejects invented ones', () => {
     expect(isGrounded('part of a whole', chapter.markdown)).toBe(true);
     expect(isGrounded('invented claim', chapter.markdown)).toBe(false);
     expect(isGrounded('', chapter.markdown)).toBe(false);
+  });
+
+  it('accepts excerpts that drop list/bullet markers present in the source', () => {
+    const source = [
+      '# Numbers',
+      '',
+      '- Three digit number is called hundreds.',
+      '| • | digits and words. |',
+    ].join('\n');
+    expect(isGrounded('Three digit number is called hundreds.', source)).toBe(true);
+    expect(isGrounded('digits and words.', source)).toBe(true);
+  });
+
+  it('accepts an excerpt spanning a table separator row', () => {
+    const source = [
+      '| We will learn in this lesson |  |',
+      '|---|---|',
+      '| digits and words. |',
+    ].join('\n');
+    expect(isGrounded('We will learn in this lesson digits and words.', source)).toBe(true);
   });
 });
 

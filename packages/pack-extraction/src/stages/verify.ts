@@ -58,17 +58,29 @@ export function normalizeWs(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+const LIST_MARKER_RE = /^\s*(?:[-*+•]|\d+[.)])\s+/;
+const SEPARATOR_LINE_RE = /^[\s:._-]*$/;
+
+/** Strip markdown structure — headings, emphasis, table pipes, list/bullet markers,
+ * and separator rows — so formatting differences do not break verbatim matching. */
 export function stripMarkdown(markdown: string): string {
   return markdown
     .split('\n')
-    .map((line) => line.replace(/^\s*#{1,6}\s*/, '').replace(/[*_`|]/g, ''))
+    .map((line) =>
+      line
+        .replace(/^\s*#{1,6}\s*/, '')
+        .replace(LIST_MARKER_RE, '')
+        .replace(/[*_`|•]/g, ''),
+    )
+    .filter((line) => !SEPARATOR_LINE_RE.test(line))
     .join('\n');
 }
 
-/** Accept an excerpt when it is a whitespace-normalized substring of either the
- * raw chapter markdown or its markdown-stripped variant. */
+/** Accept an excerpt when it is a whitespace-normalized substring of the raw chapter
+ * markdown or its markdown-stripped variant. Both sides are normalized so list/bullet
+ * markers, table pipes, and line breaks don't cause false negatives. */
 export function isGrounded(excerpt: string, markdown: string): boolean {
-  const target = normalizeWs(excerpt);
+  const target = normalizeWs(stripMarkdown(excerpt));
   if (target === '') return false;
   return (
     normalizeWs(markdown).includes(target) || normalizeWs(stripMarkdown(markdown)).includes(target)
@@ -82,7 +94,7 @@ export function pageForExcerpt(
 ): number | undefined {
   if (!markdown.includes('\f')) return undefined;
   const pages = markdown.split(/\f/);
-  const target = normalizeWs(excerpt);
+  const target = normalizeWs(stripMarkdown(excerpt));
   if (target === '') return undefined;
   for (let index = 0; index < pages.length; index += 1) {
     const page = pages[index] ?? '';
