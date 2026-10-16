@@ -22,7 +22,7 @@ export const curriculumManifest: PackManifest = {
   name: 'NIOS Mathematics Level A — Curriculum Slice',
   author: 'KnowledgeAssemble',
   language: 'en',
-  requires: [],
+  requires: ['nios-math-a-knowledge'],
   derivedFrom: 'document',
 };
 
@@ -51,13 +51,9 @@ export const concepts: Concept[] = [
 ];
 
 export const sources = {
-  documents: [
-    {
-      documentId: 'nios-math-level-a',
-      title: 'Mathematics Level A',
-      file: 'lesson-5-fractions.md',
-    },
-  ],
+  'nios-math-level-a': {
+    title: 'Mathematics Level A',
+  },
 };
 
 export const curriculum: Curriculum = {

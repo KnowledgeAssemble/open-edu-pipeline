@@ -5,7 +5,12 @@ import type { LlmStage, ModelTier } from '@open-edu/pipeline-llm';
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
 import { CurriculumSchema } from '../schemas/index.js';
 import type { GlossaryCandidate } from '../knowledge/types.js';
-import { writeJson, emitKnowledgePack, emitCurriculumPack } from '../emit/write.js';
+import {
+  writeJson,
+  emitKnowledgePack,
+  emitCurriculumPack,
+  buildPackSources,
+} from '../emit/write.js';
 import { validateKnowledgePack, validateCurriculumPack } from '../validate/pack.js';
 import type { PackResult } from '../validate/pack.js';
 import type { SourceManifest } from '../ingest/types.js';
@@ -722,9 +727,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     derivedFrom: 'document',
   };
 
-  const sources = {
-    documents: [{ documentId: manifest.id, title: manifest.title, file: options.sourceFilename }],
-  };
+  const sources = buildPackSources(manifest.id, manifest.title);
 
   const knowledgePack = emitKnowledgePack({
     outputDir: join(workingDir, 'packs'),
@@ -744,7 +747,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
       name: options.curriculumName,
       author: 'KnowledgeAssemble',
       language: 'en',
-      requires: [],
+      requires: [options.knowledgePackId],
       derivedFrom: 'document',
     };
     const curriculumPack = emitCurriculumPack({
