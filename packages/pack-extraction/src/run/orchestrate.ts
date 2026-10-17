@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import type { LlmStage, ModelTier } from '@open-edu/pipeline-llm';
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
-import { CurriculumSchema } from '../schemas/index.js';
+import { CurriculumSchema, LearningIntent } from '../schemas/index.js';
 import type { GlossaryCandidate } from '../knowledge/types.js';
 import {
   writeJson,
@@ -453,7 +453,7 @@ function buildCurriculum(
         description: objective.statement,
         bloomLevel: 'understand' as const,
         concepts: resolved,
-        requiresIntents: ['understand' as const],
+        requiresIntents: [LearningIntent.Understand],
       };
     });
 

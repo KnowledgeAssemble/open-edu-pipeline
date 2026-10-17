@@ -1411,7 +1411,7 @@ open-edu-pipeline/
                                              #   assessment/activity evidence
 ```
 
-Pack schemas are **not** re-declared here: `emit/` conforms to `PackManifestSchema` / `ConceptSchema` / `CurriculumSchema` from `@open-edu/packs` (Pack System story 1.1). Until that package ships, `pack-extraction/` carries a local mirror of the three schemas with a comment pointing at the canonical source, and a test that fails when the canonical schemas land.
+Pack schemas are **not** re-declared here: `emit/` conforms to `PackManifestSchema` / `ConceptSchema` / `CurriculumSchema` from `@open-edu/packs` (Pack System story 1.1), consumed as the published `@open-edu/packs` npm dependency. `pack-extraction/src/schemas/` is a thin **re-export shim** over that package (`src/schemas/shim.test.ts` asserts identity, so a reintroduced local copy fails the suite). A cross-repo conformance test (`src/e2e/open-edu-conformance.test.ts`) emits a pack and loads/resolves it through the consumer-facing `@open-edu/packs` loader + resolver, keeping the emitted artifacts aligned with what Course Creator Studio actually reads.
 
 ---
 
