@@ -4,5 +4,6 @@ dist/
 .env.local
 *.log
 .DS_Store
-/output/
+/output*
+/pdf
 *.tsbuildinfo

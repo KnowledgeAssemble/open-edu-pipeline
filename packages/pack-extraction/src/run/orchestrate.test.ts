@@ -104,6 +104,13 @@ describe('orchestrate (two chapters, fake LLM)', () => {
     expect(
       existsSync(join(workingDir, 'packs', 'curriculum', 'demo-curriculum', 'curriculum.json')),
     ).toBe(true);
+    const curriculumManifest = JSON.parse(
+      readFileSync(
+        join(workingDir, 'packs', 'curriculum', 'demo-curriculum', 'manifest.json'),
+        'utf8',
+      ),
+    ) as { requires: string[] };
+    expect(curriculumManifest.requires).toEqual(['demo-knowledge']);
     expect(existsSync(join(workingDir, 'source-model', 'chapters.json'))).toBe(true);
   });
 

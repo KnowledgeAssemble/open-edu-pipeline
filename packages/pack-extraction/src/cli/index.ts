@@ -8,7 +8,12 @@ import { segmentMarkdown } from '../source-model/segment.js';
 import { parseToMarkdown } from '../parse/index.js';
 import { extractKnowledge } from '../knowledge/extract.js';
 import { extractCurriculum, toCurriculum } from '../curriculum/extract.js';
-import { writeJson, emitKnowledgePack, emitCurriculumPack } from '../emit/write.js';
+import {
+  writeJson,
+  emitKnowledgePack,
+  emitCurriculumPack,
+  buildPackSources,
+} from '../emit/write.js';
 import { validateKnowledgePack, validateCurriculumPack } from '../validate/pack.js';
 import { canMergeEnrichmentIntoPack, runEnrichment } from '../enrich/index.js';
 import { orchestrate } from '../run/orchestrate.js';
@@ -333,9 +338,7 @@ async function emitLesson(input: LessonEmitInput): Promise<number> {
 
   writeJson(join(workingDir, 'review', 'curriculum-model.json'), curriculum);
 
-  const sources = {
-    documents: [{ documentId: manifest.id, title: manifest.title, file: input.sourceFilename }],
-  };
+  const sources = buildPackSources(manifest.id, manifest.title);
 
   const knowledgeManifest: PackManifest = {
     format: 'openedu-pack',
@@ -359,7 +362,7 @@ async function emitLesson(input: LessonEmitInput): Promise<number> {
     name: input.curriculumName,
     author: 'KnowledgeAssemble',
     language: 'en',
-    requires: [],
+    requires: [input.knowledgePackId],
     derivedFrom: 'document',
   };
 
