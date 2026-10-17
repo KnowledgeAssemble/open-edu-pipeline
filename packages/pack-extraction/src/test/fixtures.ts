@@ -1,4 +1,5 @@
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
+import { LearningIntent } from '../schemas/index.js';
 
 export const knowledgeManifest: PackManifest = {
   format: 'openedu-pack',
@@ -73,7 +74,7 @@ export const curriculum: Curriculum = {
           description: 'Recognise a fraction as a part of a whole.',
           bloomLevel: 'understand',
           concepts: [{ pack: 'nios-math-a-knowledge', concept: 'fraction' }],
-          requiresIntents: ['understand'],
+          requiresIntents: [LearningIntent.Understand],
         },
       ],
     },

@@ -1,20 +1,35 @@
-export { PACK_FORMAT, PACK_FORMAT_VERSION, PackTypeSchema, PackManifestSchema } from './pack.js';
-export type { PackType, PackManifest } from './pack.js';
-
-export { ConceptSourceSchema, ConceptSchema } from './concept.js';
-export type { ConceptSource, Concept } from './concept.js';
+// Single source of truth: the published @open-edu/packs package (open-edu repo).
+// This module re-exports the canonical pack schemas so pipeline code keeps a stable
+// import path while conforming exactly to what Course Creator Studio's loader/resolver
+// accept. Do not redeclare these schemas locally — a conformance test asserts the
+// re-exports are the installed package.
+import type { z } from 'zod';
+import type { CurriculumUnitSchema } from '@open-edu/packs';
 
 export {
-  LEARNING_INTENTS,
+  PACK_FORMAT,
+  PACK_FORMAT_VERSION,
+  PackTypeSchema,
+  PackManifestSchema,
+  ConceptSourceSchema,
+  ConceptSchema,
   ConceptRefSchema,
   ObjectiveSchema,
   CurriculumUnitSchema,
   CurriculumSchema,
-} from './curriculum.js';
-export type {
+  LEARNING_INTENTS,
   LearningIntent,
+} from '@open-edu/packs';
+
+export type {
+  PackType,
+  PackManifest,
+  ConceptSource,
+  Concept,
   ConceptRef,
   Objective,
-  CurriculumUnit,
   Curriculum,
-} from './curriculum.js';
+} from '@open-edu/packs';
+
+/** @open-edu/packs exports the schema but not this derived type. */
+export type CurriculumUnit = z.infer<typeof CurriculumUnitSchema>;

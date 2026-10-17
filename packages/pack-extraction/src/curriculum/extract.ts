@@ -1,8 +1,8 @@
 import type { KnowledgeModel } from '../knowledge/types.js';
 import type { SourceDocumentModel } from '../source-model/types.js';
 import { slugify } from '../source-model/normalize.js';
-import { CurriculumSchema } from '../schemas/index.js';
-import type { LearningIntent } from '../schemas/index.js';
+import { CurriculumSchema, LearningIntent } from '../schemas/index.js';
+import type { Curriculum } from '../schemas/index.js';
 
 export interface CurriculumLikeness {
   title: string;
@@ -34,7 +34,7 @@ export function extractCurriculum(
     description: statement.statement.slice(0, 500),
     bloomLevel: 'understand' as const,
     concepts: conceptIds,
-    requiresIntents: ['understand'] as LearningIntent[],
+    requiresIntents: [LearningIntent.Understand],
   }));
 
   return {
@@ -55,7 +55,7 @@ export function extractCurriculum(
 export function toCurriculum(
   likeness: CurriculumLikeness,
   refs: { knowledgePackId: string; curriculumPackId: string },
-): CurriculumSchema {
+): Curriculum {
   return CurriculumSchema.parse({
     id: refs.curriculumPackId,
     title: likeness.title,
