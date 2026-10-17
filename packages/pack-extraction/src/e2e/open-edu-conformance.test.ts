@@ -48,6 +48,10 @@ describe('emitted packs conform to the @open-edu/packs loader and resolver', () 
       unit: 'lesson-5-fractions',
     });
     expect(errors(resolveDiagnostics)).toEqual([]);
+    // The only expected diagnostic is the capability gap: no activity catalog was supplied,
+    // so the single objective matches nothing. Any other code would be a real regression.
+    expect(resolveDiagnostics.map((d) => d.code)).toEqual(['CAPABILITY_GAP']);
+    expect(context.objectives).toHaveLength(1);
 
     // Concepts are resolved from the pack declared in curriculum.requires.
     expect(context.concepts.map((c) => c.ref.concept)).toContain('fraction');

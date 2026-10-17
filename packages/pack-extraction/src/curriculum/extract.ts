@@ -1,6 +1,7 @@
 import type { KnowledgeModel } from '../knowledge/types.js';
 import type { SourceDocumentModel } from '../source-model/types.js';
 import { slugify } from '../source-model/normalize.js';
+import { cappedId } from '../stages/verify.js';
 import { CurriculumSchema, LearningIntent } from '../schemas/index.js';
 import type { Curriculum } from '../schemas/index.js';
 
@@ -30,7 +31,8 @@ export function extractCurriculum(
   // Deliberate slice simplification: objectives link to every extracted concept.
   // Keyword/term-to-concept matching is a later enrichment, not this contract.
   const objectives = knowledge.statements.map((statement) => ({
-    id: statement.id,
+    // Pack ids are capped at 128 by PackIdSchema; statement slugs are not.
+    id: cappedId(statement.id),
     description: statement.statement.slice(0, 500),
     bloomLevel: 'understand' as const,
     concepts: conceptIds,
@@ -43,7 +45,8 @@ export function extractCurriculum(
     level: 'A',
     units: [
       {
-        id: slugify(doc.document.title),
+        // PackIdSchema caps ids at 128; a long document title would otherwise throw.
+        id: cappedId(slugify(doc.document.title)),
         title: doc.document.title,
         concepts: conceptIds,
         objectives,

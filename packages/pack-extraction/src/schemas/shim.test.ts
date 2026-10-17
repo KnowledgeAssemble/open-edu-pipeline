@@ -6,6 +6,9 @@ import * as shim from './index.js';
 // must be the installed @open-edu/packs package, not a copy of it.
 describe('schemas shim', () => {
   it('re-exports the installed @open-edu/packs schemas by identity', () => {
+    expect(shim.PACK_FORMAT).toBe(installed.PACK_FORMAT);
+    expect(shim.PACK_FORMAT_VERSION).toBe(installed.PACK_FORMAT_VERSION);
+    expect(shim.PackTypeSchema).toBe(installed.PackTypeSchema);
     expect(shim.PackManifestSchema).toBe(installed.PackManifestSchema);
     expect(shim.ConceptSchema).toBe(installed.ConceptSchema);
     expect(shim.ConceptSourceSchema).toBe(installed.ConceptSourceSchema);

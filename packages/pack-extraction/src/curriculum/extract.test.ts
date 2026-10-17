@@ -28,7 +28,7 @@ const curriculum = toCurriculum(extractCurriculum(knowledge, doc), {
 });
 
 describe('toCurriculum', () => {
-  it('is valid against the schema mirror', () => {
+  it('is valid against the @open-edu/packs schema', () => {
     expect(CurriculumSchema.safeParse(curriculum).success).toBe(true);
   });
 
@@ -56,6 +56,34 @@ describe('toCurriculum', () => {
           expect(ref.pack).toBe('nios-math-a-knowledge');
           expect(knownConcepts.has(ref.concept)).toBe(true);
         }
+      }
+    }
+  });
+});
+
+describe('extractCurriculum id capping', () => {
+  it('caps unit and objective ids to the 128 limit so the curriculum still parses', () => {
+    const longTitle = 'A'.repeat(200);
+    const longStatement = 'Recognise '.repeat(40);
+    const longDoc = parseMarkdown(`# ${longTitle}\n\n## Objectives\n* ${longStatement}\n`);
+    longDoc.document.id = 'long-doc';
+    const longKnowledge = extractKnowledge(longDoc, {
+      id: 'long-doc',
+      title: longTitle,
+      format: 'markdown',
+      filename: 'long.md',
+    });
+
+    const built = toCurriculum(extractCurriculum(longKnowledge, longDoc), {
+      knowledgePackId: 'long-knowledge',
+      curriculumPackId: 'long-curriculum',
+    });
+
+    expect(CurriculumSchema.safeParse(built).success).toBe(true);
+    for (const unit of built.units) {
+      expect(unit.id.length).toBeLessThanOrEqual(128);
+      for (const objective of unit.objectives) {
+        expect(objective.id.length).toBeLessThanOrEqual(128);
       }
     }
   });

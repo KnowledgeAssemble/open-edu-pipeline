@@ -1,8 +1,8 @@
 // Single source of truth: the published @open-edu/packs package (open-edu repo).
 // This module re-exports the canonical pack schemas so pipeline code keeps a stable
 // import path while conforming exactly to what Course Creator Studio's loader/resolver
-// accept. Do not redeclare these schemas locally — a conformance test asserts the
-// re-exports are the installed package.
+// accept. Do not redeclare these schemas locally — shim.test.ts asserts the re-exports
+// are the installed package by identity.
 import type { z } from 'zod';
 import type { CurriculumUnitSchema } from '@open-edu/packs';
 

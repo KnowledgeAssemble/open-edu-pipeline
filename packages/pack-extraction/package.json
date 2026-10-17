@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@llamaindex/liteparse": "^2.8.0",
-    "@open-edu/packs": "^0.1.0",
+    "@open-edu/packs": "0.1.0",
     "@open-edu/pipeline-llm": "workspace:*",
     "zod": "^3.22.0"
   },
