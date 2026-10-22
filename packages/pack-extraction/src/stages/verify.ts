@@ -5,7 +5,7 @@ import type { ChapterExtractionSchema } from './extract.js';
 import {
   chapterCoverage,
   createSectionLocator,
-  excerptLineRange,
+  excerptLineRanges,
   listItemsInRange,
   type CoverageReport,
   type SectionLocator,
@@ -55,6 +55,13 @@ export interface VerifyChapterResult {
 
 export interface VerifyOptions {
   usedConceptIds: Set<string>;
+  /**
+   * Apply the recall gates (objective gap, lost sections, coverage floor). They
+   * measure what an LLM extraction missed; the deterministic extractor is not
+   * expected to cover the chapter's sections, so its attempts opt out and keep
+   * the precision gates only. Defaults to `true`.
+   */
+  enforceCoverage?: boolean;
 }
 
 /** Max id length allowed by the pack schemas (`ConceptSchema`); objectives/units share it. */
@@ -218,17 +225,42 @@ function linkConcepts(input: {
  * block into one excerpt states several objectives in one. Splitting the excerpt
  * back into its list items keeps one objective per stated bullet, whatever the
  * model did.
+ *
+ * The excerpt can occur more than once in the chapter (an objective bullet that the
+ * body repeats). The occurrence spanning the most list items is the objective
+ * block, not the sentence quoted in the prose.
  */
 function objectiveParts(markdown: string, excerpt: string): string[] {
-  const range = excerptLineRange(markdown, excerpt);
-  if (!range) return [];
-  const items = listItemsInRange(markdown, range.start, range.end);
-  return items.length > 1 ? items : [];
+  let best: string[] = [];
+  for (const range of excerptLineRanges(markdown, excerpt)) {
+    const items = listItemsInRange(markdown, range.start, range.end);
+    if (items.length > best.length) best = items;
+  }
+  return best.length > 1 ? best : [];
+}
+
+/**
+ * Function words that carry no concept signal when matching a concept title to an
+ * objective bullet. Unlike {@link STOPWORDS} it keeps content words such as
+ * "place", "value" and "digit", which are exactly what split objectives differ on.
+ */
+const DISTRIBUTION_STOPWORDS = new Set(
+  'the and for with from that this these those of in to a an as at by on or into over under'.split(
+    ' ',
+  ),
+);
+
+/** Content words used to match a concept title to an objective bullet. */
+function distributionWords(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z]+/g) ?? []).filter(
+    (word) => word.length > 2 && !DISTRIBUTION_STOPWORDS.has(word),
+  );
 }
 
 /**
  * Spread the model's concept mapping over the objectives a split excerpt stands
- * for: each concept goes to the part that shares the most words with its title.
+ * for: each concept goes to the bullet that names it (the title appears verbatim),
+ * else the bullet that shares the most content words with its title.
  */
 function distributeTermIds(
   parts: string[],
@@ -236,17 +268,20 @@ function distributeTermIds(
   concepts: VerifiedConcept[],
 ): string[][] {
   const byId = new Map(concepts.map((concept) => [concept.id, concept]));
+  const partKeys = parts.map((part) => normalizeWs(part).toLowerCase());
+  const partWords = parts.map((part) => new Set(distributionWords(part)));
   const distributed = parts.map(() => [] as string[]);
   for (const id of termIds) {
     const concept = byId.get(id);
     if (!concept) continue;
-    const titleWords = new Set(significantWords(concept.title));
+    const titleKey = normalizeWs(concept.title).toLowerCase();
+    const titleWords = distributionWords(concept.title);
     let best = 0;
     let bestScore = -1;
-    parts.forEach((part, index) => {
-      const partWords = new Set(significantWords(part));
+    parts.forEach((_, index) => {
       let score = 0;
-      for (const word of titleWords) if (partWords.has(word)) score += 1;
+      if (titleKey !== '' && partKeys[index]!.includes(titleKey)) score += 10;
+      for (const word of titleWords) if (partWords[index]!.has(word)) score += 1;
       if (score > bestScore) {
         bestScore = score;
         best = index;
@@ -386,22 +421,29 @@ export function verifyExtraction(
     extractedObjectives: objectives.length,
   });
 
+  const enforceCoverage = options.enforceCoverage ?? true;
   const rejectedRatio = totalItems === 0 ? 1 : rejections.length / totalItems;
   const failures: string[] = [];
   if (objectives.length < 1)
     failures.push('objective-gap: no grounded learning objective was extracted');
-  if (coverage.objectiveGap > 0) {
+  if (enforceCoverage && coverage.objectiveGap > 0) {
     failures.push(
       `objective-gap: the chapter states ${coverage.statedObjectives} learning objectives but only ${coverage.extractedObjectives} were extracted — emit one objective for every stated objective bullet, nested bullets included`,
     );
   }
-  for (const title of coverage.lostSections) {
-    failures.push(
-      `uncovered-section: "${title}" — its only concept was rejected; extract a concept from this section`,
-    );
-  }
-  for (const title of coverage.uncoveredSections) {
-    failures.push(`uncovered-section: "${title}" — extract at least one concept from this section`);
+  if (enforceCoverage) {
+    const lost = new Set(coverage.lostSections);
+    for (const title of coverage.lostSections) {
+      failures.push(
+        `uncovered-section: "${title}" — its only concept was rejected; extract a concept from this section`,
+      );
+    }
+    for (const title of coverage.uncoveredSections) {
+      if (lost.has(title)) continue;
+      failures.push(
+        `uncovered-section: "${title}" — extract at least one concept from this section`,
+      );
+    }
   }
   if (rejectedRatio >= 0.3) {
     failures.push(
@@ -409,12 +451,10 @@ export function verifyExtraction(
     );
   }
 
-  const healthy =
-    objectives.length >= 1 &&
-    rejectedRatio < 0.3 &&
-    coverage.objectiveGap === 0 &&
-    coverage.lostSections.length === 0 &&
-    !coverage.lowCoverage;
+  const coverageHealthy =
+    !enforceCoverage ||
+    (coverage.objectiveGap === 0 && coverage.lostSections.length === 0 && !coverage.lowCoverage);
+  const healthy = objectives.length >= 1 && rejectedRatio < 0.3 && coverageHealthy;
 
   return { concepts, objectives, rejections, totalItems, healthy, coverage, failures };
 }

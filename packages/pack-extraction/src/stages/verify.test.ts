@@ -247,6 +247,84 @@ describe('objective granularity', () => {
     expect(result.coverage.objectiveGap).toBe(0);
   });
 
+  it('splits the occurrence that spans the objective block, not a prose quote', () => {
+    const proseFirst: Chapter = {
+      ...nested,
+      markdown: [
+        '# Unit 1 Numbers',
+        '',
+        '### 1.1 Place value',
+        '',
+        'Read place values of digits. (i) Place value of two digit numbers.',
+        '',
+        '### We will learn in this lesson',
+        '- Read place values of digits.',
+        '  - (i) Place value of two digit numbers.',
+      ].join('\n'),
+    };
+    const result = verifyExtraction(
+      proseFirst,
+      {
+        concepts: [],
+        objectives: [
+          {
+            statement: 'Read place values of digits.',
+            excerpt: 'Read place values of digits. (i) Place value of two digit numbers.',
+            conceptTerms: [],
+          },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      { usedConceptIds: new Set() },
+    );
+    expect(result.objectives.map((objective) => objective.statement)).toEqual([
+      'Read place values of digits.',
+      'Place value of two digit numbers.',
+    ]);
+  });
+
+  it('gives a split objective the concept its own text names', () => {
+    const result = verifyExtraction(
+      nested,
+      {
+        concepts: [
+          {
+            term: 'Place value of digits in two digit numbers',
+            summary: 'two digits',
+            excerpt: 'A two digit number has two digits.',
+          },
+          {
+            term: 'Place value of digits in three digit numbers',
+            summary: 'hundreds',
+            excerpt: 'A three digit number is called hundreds.',
+          },
+        ],
+        objectives: [
+          {
+            statement: 'Read place values of digits.',
+            excerpt:
+              'Read place values of digits. (i) Place value of two digit numbers. (ii) Place value of three digit numbers.',
+            conceptTerms: [
+              'Place value of digits in two digit numbers',
+              'Place value of digits in three digit numbers',
+            ],
+          },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      { usedConceptIds: new Set() },
+    );
+    const byTitle = new Map(result.objectives.map((objective) => [objective.statement, objective]));
+    expect(byTitle.get('Place value of two digit numbers.')?.concepts).toEqual([
+      'place-value-of-digits-in-two-digit-numbers',
+    ]);
+    expect(byTitle.get('Place value of three digit numbers.')?.concepts).toEqual([
+      'place-value-of-digits-in-three-digit-numbers',
+    ]);
+  });
+
   it('keeps the model statement when the objective covers a single bullet', () => {
     const result = verifyExtraction(
       nested,
@@ -334,6 +412,28 @@ describe('chapter health', () => {
     expect(result.coverage.lowCoverage).toBe(true);
     expect(result.healthy).toBe(false);
     expect(result.failures.join(' ')).toContain('uncovered-section');
+  });
+
+  it('skips recall gates for deterministic attempts', () => {
+    const result = verifyExtraction(
+      healthChapter,
+      {
+        concepts: [],
+        objectives: [
+          {
+            statement: 'Read place values of digits.',
+            excerpt: 'Read place values of digits.',
+            conceptTerms: [],
+          },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      { usedConceptIds: new Set(), enforceCoverage: false },
+    );
+    expect(result.coverage.lowCoverage).toBe(true);
+    expect(result.healthy).toBe(true);
+    expect(result.failures.join(' ')).not.toContain('uncovered-section');
   });
 
   it('keeps a fully covered chapter healthy', () => {

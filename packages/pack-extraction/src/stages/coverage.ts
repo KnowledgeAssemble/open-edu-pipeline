@@ -39,7 +39,7 @@ export const LOW_COVERAGE_FLOOR = 0.5;
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const LIST_ITEM_RE = /^\s*(?:[-*+•]|\d+[.)])\s+/;
-const ENUM_MARKER_RE = /^\s*(?:\([a-zivx]+\)|\d+[.)])\s+/i;
+const ENUM_MARKER_RE = /^\s*(?:\([a-zivx]+\)|[a-z][.)]|\d+[.)])\s+/i;
 const TEACHING_TITLE_RE = /^\d+(?:\.\d+)*\s+\S/;
 const OBJECTIVE_HEADING_RE =
   /(we will learn|what you will learn|learning objective|learning outcome|course outcome)/i;
@@ -118,22 +118,24 @@ function teachingAncestor(
 /**
  * Learning objectives the chapter states in its source: every bullet under a
  * "We will learn …" / "Learning Objectives" heading, nested bullets included.
+ *
+ * Each objective block ends at the next heading of *any* level, so a chapter-level
+ * "## Learning Objectives" heading does not swallow the bullets of every section
+ * below it. Blocks are disjoint, so summing them counts a stated objective once
+ * even when a nested "We will learn" heading sits inside the block.
  */
 export function countStatedObjectives(markdown: string): number {
   const lines = markdown.split('\n');
   const found = headings(markdown);
-  let best = 0;
+  let total = 0;
   found.forEach((heading, index) => {
     if (!OBJECTIVE_HEADING_RE.test(heading.title)) return;
-    const end =
-      found.slice(index + 1).find((next) => next.level <= heading.level)?.line ?? lines.length;
-    let count = 0;
+    const end = found[index + 1]?.line ?? lines.length;
     for (let line = heading.line + 1; line < end; line += 1) {
-      if (LIST_ITEM_RE.test(lines[line] ?? '')) count += 1;
+      if (LIST_ITEM_RE.test(lines[line] ?? '')) total += 1;
     }
-    if (count > best) best = count;
   });
-  return best;
+  return total;
 }
 
 /**
@@ -178,15 +180,16 @@ export function listItemsInRange(markdown: string, startLine: number, endLine: n
 }
 
 /**
- * Line range an excerpt covers in the chapter source. Returns `undefined` when
- * the excerpt cannot be found (it was rejected as ungrounded).
+ * Line ranges an excerpt covers in the chapter source, one per occurrence.
+ * Returns an empty array when the excerpt cannot be found (it was rejected as
+ * ungrounded).
  */
-export function excerptLineRange(
+export function excerptLineRanges(
   markdown: string,
   excerpt: string,
-): { start: number; end: number } | undefined {
+): Array<{ start: number; end: number }> {
   const target = normalizeWs(stripMarkdown(excerpt));
-  if (target === '') return undefined;
+  if (target === '') return [];
   const lines = markdown.split('\n');
   const offsets: number[] = [];
   let cumulative = '';
@@ -196,16 +199,30 @@ export function excerptLineRange(
     cumulative += normalizeWs(stripMarkdown(line));
   });
 
-  const found = cumulative.indexOf(target);
-  if (found === -1) return undefined;
-  const last = found + target.length;
-  let start = 0;
-  let end = 0;
-  offsets.forEach((offset, index) => {
-    if (offset <= found) start = index;
-    if (offset < last) end = index;
-  });
-  return { start, end };
+  const ranges: Array<{ start: number; end: number }> = [];
+  let from = 0;
+  for (;;) {
+    const found = cumulative.indexOf(target, from);
+    if (found === -1) break;
+    const last = found + target.length;
+    let start = 0;
+    let end = 0;
+    offsets.forEach((offset, index) => {
+      if (offset <= found) start = index;
+      if (offset < last) end = index;
+    });
+    ranges.push({ start, end });
+    from = found + 1;
+  }
+  return ranges;
+}
+
+/** First line range an excerpt covers; see {@link excerptLineRanges} for all of them. */
+export function excerptLineRange(
+  markdown: string,
+  excerpt: string,
+): { start: number; end: number } | undefined {
+  return excerptLineRanges(markdown, excerpt)[0];
 }
 
 export interface CoverageInput {

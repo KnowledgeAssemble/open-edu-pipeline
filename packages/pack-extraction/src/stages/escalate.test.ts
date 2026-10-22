@@ -55,9 +55,22 @@ describe('shouldEscalate', () => {
     expect(shouldEscalate(verify)).toBe(true);
   });
 
-  it('escalates when teaching sections are uncovered', () => {
+  it('escalates when coverage is below the floor', () => {
     const verify = result(true, { coverage: coverage({ lowCoverage: true }) });
     expect(shouldEscalate(verify)).toBe(true);
+  });
+
+  it('does not escalate a healthy chapter with a few uncovered sections', () => {
+    const verify = result(true, {
+      coverage: coverage({
+        teachingSections: 15,
+        coveredSections: 14,
+        uncoveredSections: ['1.13 Descending order'],
+        coverageRatio: 14 / 15,
+        lowCoverage: false,
+      }),
+    });
+    expect(shouldEscalate(verify)).toBe(false);
   });
 
   it('escalates when a section lost its only concept', () => {

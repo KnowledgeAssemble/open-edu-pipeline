@@ -151,7 +151,8 @@ Under `output/<manifest.id>/`:
   the underlying SDK's own transient retries still apply.
 - **Output ceiling.** Extraction and merge calls ask for a larger output budget than the
   stage default (16 384 and 8 192 tokens): a long chapter yields many concepts and the
-  escalation retry yields more, which overflows the default 4 096-token stage budget.
+  escalation retry yields more, which overflows the default 4 096-token stage budget. Set
+  `LLM_MAX_OUTPUT_TOKENS` when the provider or model caps output below the default.
 - **Unresolved duplicates.** A chapter-scoped temporary concept id that the merge does not
   cluster is finalized to a stable id and kept in the knowledge pack, but excluded from
   curriculum-unit concept refs — no concept is silently dropped.
@@ -165,12 +166,21 @@ Under `output/<manifest.id>/`:
   a single objective. A chapter that states N objectives and yields fewer is not healthy.
   The rule is structural, not only a prompt request: when a model's excerpt covers a parent
   bullet _and_ its nested sub-bullets, the verifier splits that excerpt back into one
-  objective per stated bullet, so the count holds whatever the model returns.
+  objective per stated bullet, so the count holds whatever the model returns. When the text
+  occurs more than once in the chapter, the occurrence spanning the most bullets wins.
 - **Coverage.** Precision (every excerpt is grounded) is not enough on its own: the verifier
   also measures how much of the chapter was captured — stated objectives vs extracted
-  objectives, and numbered teaching sections vs sections carrying a concept. A chapter that
-  drops a stated objective or leaves a teaching section empty escalates, and stays
-  `pending-human` when the retry does not close the gap.
+  objectives, and numbered teaching sections vs sections carrying a concept. Stated objectives
+  are the bullets under each objective heading, and an objective block ends at the next heading
+  of any level, so a chapter-level "## Learning Objectives" heading does not count every bullet
+  in the chapter. A chapter escalates when it drops a stated objective, loses a section to a
+  rejection, or covers less than half the numbered teaching sections; individual uncovered
+  sections are named in the retry prompt but do not by themselves trigger it. Gaps the retry
+  does not close leave the chapter `pending-human`.
+- **Coverage applies to LLM attempts.** The recall gates measure what a model missed, so the
+  deterministic extractor keeps only the precision gates (`objectives ≥ 1`, `< 30%` rejected).
+  Its coverage is still recorded in the review artifacts, so a `--no-llm` run reports the gap
+  without failing on it.
 - **Objective links.** An objective links the concepts it practises — the terms the model
   named, else the concepts of the same teaching section, else a distinctive-word match. It is
   never linked to every concept of the chapter.

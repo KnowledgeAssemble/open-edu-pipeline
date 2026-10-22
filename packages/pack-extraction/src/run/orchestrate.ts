@@ -147,6 +147,16 @@ const EXTRACTION_MAX_TOKENS = 16384;
 /** Output ceiling for the cross-chapter merge. */
 const MERGE_MAX_TOKENS = 8192;
 
+/** Extraction ceiling, lowered by `LLM_MAX_OUTPUT_TOKENS` for capped models. */
+function extractionMaxTokens(tier: TierConfig): number {
+  return tier.maxOutputTokens ?? EXTRACTION_MAX_TOKENS;
+}
+
+/** Merge ceiling, lowered by `LLM_MAX_OUTPUT_TOKENS` for capped models. */
+function mergeMaxTokens(tier: TierConfig): number {
+  return tier.maxOutputTokens ?? MERGE_MAX_TOKENS;
+}
+
 async function callStructured<T>(args: {
   ctx: CallContext;
   stage: LlmStage;
@@ -242,6 +252,10 @@ function deterministicExtraction(chapter: Chapter, manifest: SourceManifest): Ch
  * the chapter. A weaker retry must not throw away grounded content.
  */
 function isBetterAttempt(candidate: VerifyChapterResult, current: VerifyChapterResult): boolean {
+  // Health dominates: a clean retry beats a larger attempt that still has a gap,
+  // a lost section or a rejected item. Only two unhealthy attempts are compared on
+  // how much they extracted.
+  if (candidate.healthy !== current.healthy) return candidate.healthy;
   if (candidate.concepts.length !== current.concepts.length) {
     return candidate.concepts.length > current.concepts.length;
   }
@@ -306,7 +320,10 @@ async function processChapter(args: {
   const { chapter, manifest, usedConceptIds } = args;
   const detExtraction = deterministicExtraction(chapter, manifest);
   const detTrial = new Set(usedConceptIds);
-  const detVerify = verifyExtraction(chapter, detExtraction, { usedConceptIds: detTrial });
+  const detVerify = verifyExtraction(chapter, detExtraction, {
+    usedConceptIds: detTrial,
+    enforceCoverage: false,
+  });
   const detSufficient = detVerify.concepts.length >= 1 && detVerify.objectives.length >= 1;
   const llmAllowed = args.llmMode !== 'off' && args.client !== undefined;
   const wantLlm = llmAllowed && (!detSufficient || args.llmMode === 'force');
@@ -367,7 +384,7 @@ async function processChapter(args: {
     promptVersion: EXTRACT_PROMPT_VERSION,
     schemaVersion: EXTRACT_SCHEMA_VERSION,
     model: args.tierConfig.fast,
-    maxTokens: EXTRACTION_MAX_TOKENS,
+    maxTokens: extractionMaxTokens(args.tierConfig),
   });
   report.usedLlm = true;
   report.cacheHit = call.cacheHit;
@@ -396,7 +413,7 @@ async function processChapter(args: {
       promptVersion: EXTRACT_ESCALATION_PROMPT_VERSION,
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       model: args.tierConfig.escalation,
-      maxTokens: EXTRACTION_MAX_TOKENS,
+      maxTokens: extractionMaxTokens(args.tierConfig),
     });
     report.escalated = true;
     report.estimatedInputTokens += escalated.usage.inputTokens;
@@ -612,7 +629,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
         objectiveGap: 0,
         teachingSections: 0,
         coveredSections: 0,
-        coverageRatio: 0,
+        coverageRatio: 1,
         lowCoverage: false,
         estimatedInputTokens: fastEstimate.inputTokens + escalationEstimate.inputTokens,
         estimatedOutputTokens: fastEstimate.outputTokens + escalationEstimate.outputTokens,
@@ -733,7 +750,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
         promptVersion: MERGE_PROMPT_VERSION,
         schemaVersion: MERGE_SCHEMA_VERSION,
         model: options.tierConfig.fast,
-        maxTokens: MERGE_MAX_TOKENS,
+        maxTokens: mergeMaxTokens(options.tierConfig),
       });
       merge = applyMerge({ concepts: allConcepts, result: call.data, chapterText });
       report.totals.estimatedInputTokens += call.usage.inputTokens;

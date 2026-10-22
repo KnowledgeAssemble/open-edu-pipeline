@@ -265,3 +265,154 @@ describe('orchestrate (two chapters, fake LLM)', () => {
     expect(bookCoverage.chapters).toHaveLength(2);
   });
 });
+
+const OBJECTIVES_BOOK = [
+  '# Chapter 1 Addition',
+  '',
+  '### We will learn in this lesson',
+  '- Add small numbers.',
+  '- Add large numbers.',
+  '',
+  '### 1.1 Small numbers',
+  '',
+  'Small numbers add quickly.',
+  '',
+  '### 1.2 Large numbers',
+  '',
+  'Large numbers add slowly.',
+].join('\n');
+
+const objectivesManifest: SourceManifest = {
+  ...manifest,
+  id: 'objectives-book',
+  filename: 'objectives.md',
+};
+
+function objectivesOptions(workingDir: string, llmClient: LlmClient, llmMode: 'auto' | 'force') {
+  return {
+    ...options(workingDir, llmClient, llmMode),
+    markdown: OBJECTIVES_BOOK,
+    manifest: objectivesManifest,
+    knowledgePackId: 'objectives-knowledge',
+    curriculumPackId: 'objectives-curriculum',
+  } as const;
+}
+
+function objectivesClient(fast: unknown, escalated: unknown): LlmClient {
+  return new FakeLlmClient((request: LlmRequest<never>) => {
+    if (request.prompt.includes('duplicateClusters')) {
+      return { duplicateClusters: [], prerequisiteLinks: [] };
+    }
+    if (request.prompt.includes('Fix ONLY these problems')) return escalated;
+    return fast;
+  });
+}
+
+describe('escalation attempt selection', () => {
+  it('keeps a healthy retry even when it extracted fewer concepts', async () => {
+    const workingDir = makeWorkingDir();
+    const client = objectivesClient(
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+          { term: 'Addition', summary: 'combining', excerpt: 'Chapter 1 Addition' },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+          { statement: 'Add large numbers.', excerpt: 'Add large numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+    );
+
+    const { exitCode, report } = await orchestrate(objectivesOptions(workingDir, client, 'force'));
+    const chapter = report.chapters[0];
+    expect(chapter?.escalated).toBe(true);
+    expect(chapter?.concepts).toBe(2);
+    expect(chapter?.objectives).toBe(2);
+    expect(chapter?.pendingHuman).toBe(false);
+    expect(exitCode).toBe(0);
+  });
+
+  it('keeps the larger fast attempt when both attempts are unhealthy', async () => {
+    const workingDir = makeWorkingDir();
+    const client = objectivesClient(
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+          { term: 'Addition', summary: 'combining', excerpt: 'Chapter 1 Addition' },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+    );
+
+    const { exitCode, report } = await orchestrate(objectivesOptions(workingDir, client, 'force'));
+    const chapter = report.chapters[0];
+    expect(chapter?.escalated).toBe(true);
+    expect(chapter?.concepts).toBe(3);
+    expect(chapter?.objectives).toBe(1);
+    expect(chapter?.pendingHuman).toBe(true);
+    expect(exitCode).toBe(1);
+  });
+});

@@ -4,6 +4,7 @@ import {
   chapterCoverage,
   countStatedObjectives,
   excerptLineRange,
+  excerptLineRanges,
   listItemsInRange,
   locateExcerpt,
   parseSections,
@@ -61,6 +62,38 @@ describe('countStatedObjectives', () => {
     expect(countStatedObjectives('# Chapter\n\nSome prose.')).toBe(0);
   });
 
+  it('stops a shallow objective block at the next heading', () => {
+    const shallow = [
+      '## Learning Objectives',
+      '- recognise a fraction',
+      '- identify the numerator',
+      '',
+      '### 1.1 Fractions around us',
+      '',
+      '- cut a cake into pieces',
+      '- share it with friends',
+      '',
+      '### 1.2 Numerator and denominator',
+      '',
+      '- the top number is the numerator',
+      '- the bottom number is the denominator',
+    ].join('\n');
+    expect(countStatedObjectives(shallow)).toBe(2);
+  });
+
+  it('counts sibling objective blocks once each', () => {
+    const siblings = [
+      '## Learning Objectives',
+      '- one',
+      '- two',
+      '',
+      '## Learning Outcomes',
+      '- three',
+      '- four',
+    ].join('\n');
+    expect(countStatedObjectives(siblings)).toBe(4);
+  });
+
   it('counts legacy "Learning Objectives" bullet lists', () => {
     const legacy = [
       '## Learning Objectives',
@@ -103,6 +136,13 @@ describe('excerptLineRange', () => {
   it('returns undefined for an excerpt that is not in the chapter', () => {
     expect(excerptLineRange(BOOK, 'completely absent text')).toBeUndefined();
   });
+
+  it('lists every occurrence of a repeated excerpt', () => {
+    const repeated = ['Read place values of digits.', '', '- Read place values of digits.'].join(
+      '\n',
+    );
+    expect(excerptLineRanges(repeated, 'Read place values of digits.')).toHaveLength(2);
+  });
 });
 
 describe('listItemsInRange', () => {
@@ -120,6 +160,11 @@ describe('listItemsInRange', () => {
     expect(listItemsInRange(BOOK, range!.start, range!.end)).toEqual([
       'Place value of two digit numbers.',
     ]);
+  });
+
+  it('removes lettered enumerators in both bracket styles', () => {
+    const lines = ['- (a) alpha', '- a) alpha', '- a. alpha', '- (iv) alpha'].join('\n');
+    expect(listItemsInRange(lines, 0, 3)).toEqual(['alpha', 'alpha', 'alpha', 'alpha']);
   });
 
   it('returns nothing for a range without bullets', () => {
