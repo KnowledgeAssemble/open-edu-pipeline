@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { LlmStage } from '@open-edu/pipeline-llm';
 
-export const EXTRACT_PROMPT_VERSION = '2';
-export const EXTRACT_ESCALATION_PROMPT_VERSION = '2';
+export const EXTRACT_PROMPT_VERSION = '3';
+export const EXTRACT_ESCALATION_PROMPT_VERSION = '3';
 export const EXTRACT_SCHEMA_VERSION = '1';
 export const MERGE_PROMPT_VERSION = '1';
 export const MERGE_SCHEMA_VERSION = '1';
@@ -60,6 +60,8 @@ const SYSTEM_RULES = [
   '7. Empty arrays are valid answers when the chapter contains nothing of that kind.',
   '8. Keep each excerpt under 600 characters.',
   '9. Respond with JSON only, matching the requested schema.',
+  '10. Emit one objective per stated learning objective in the chapter (one per bullet when the chapter lists them). Never merge several stated objectives into a single objective, and never invent an objective the chapter does not state.',
+  '11. An objective excerpt must cover that one objective only, never several bullet points or lines joined together.',
 ].join('\n');
 
 /** Neutralize the chapter fences so source text cannot break the prompt structure. */
@@ -79,7 +81,7 @@ export function buildExtractPrompt(chapter: { title: string; markdown: string })
     '',
     'Return an object with four arrays:',
     '- concepts: { term, summary, excerpt } — key ideas named in the chapter.',
-    '- objectives: { statement, excerpt } — stated learning objectives.',
+    '- objectives: { statement, excerpt } — one objective per stated learning objective; the excerpt is that single objective copied verbatim.',
     '- examples: { term, excerpt } — worked examples, naming the concept.',
     '- prerequisites: { fromTerm, toTerm, excerpt } — one concept must be understood first.',
     '',

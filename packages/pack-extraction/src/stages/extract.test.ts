@@ -36,6 +36,12 @@ describe('extract prompts', () => {
     expect(prompt).toContain('Never join text from different lines');
   });
 
+  it('requires one objective per stated learning objective', () => {
+    const prompt = buildExtractPrompt({ title: 'T', markdown: 'body' });
+    expect(prompt).toContain('one objective per stated learning objective');
+    expect(prompt).toContain('Never merge several stated objectives');
+  });
+
   it('omits the failure block when there are no failures', () => {
     const prompt = buildEscalationPrompt({ title: 'T', markdown: 'body' }, []);
     expect(prompt).not.toContain('rejected by a deterministic verifier');
