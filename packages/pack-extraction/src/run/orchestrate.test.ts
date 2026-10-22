@@ -53,7 +53,7 @@ function fakeExtraction(prompt: string): unknown {
       .find((line) => line !== '' && !line.startsWith('#')) ?? title;
   return {
     concepts: [{ term: title, summary: firstLine, excerpt: firstLine }],
-    objectives: [{ statement: title, excerpt: firstLine }],
+    objectives: [{ statement: title, excerpt: firstLine, conceptTerms: [] }],
     examples: [],
     prerequisites: [],
   };
@@ -180,5 +180,88 @@ describe('orchestrate (two chapters, fake LLM)', () => {
     });
     expect(exitCode).toBe(0);
     expect(delays).toEqual([10, 20]);
+  });
+
+  it('escalates a chapter whose fast attempt was rejected and keeps the better attempt', async () => {
+    const workingDir = makeWorkingDir();
+    const client = new FakeLlmClient((request: LlmRequest<never>) => {
+      if (request.prompt.includes('rejected by a deterministic verifier')) {
+        return {
+          concepts: [
+            {
+              term: 'Addition',
+              summary: 'combines',
+              excerpt: 'Addition combines two numbers into a sum.',
+            },
+          ],
+          objectives: [
+            {
+              statement: 'Addition',
+              excerpt: 'Addition combines two numbers into a sum.',
+              conceptTerms: [],
+            },
+          ],
+          examples: [],
+          prerequisites: [],
+        };
+      }
+      return {
+        concepts: [{ term: 'Ghost', summary: 'invented', excerpt: 'this text is absent' }],
+        objectives: [
+          {
+            statement: 'Addition',
+            excerpt: 'Addition combines two numbers into a sum.',
+            conceptTerms: [],
+          },
+        ],
+        examples: [],
+        prerequisites: [],
+      };
+    });
+    const { report } = await orchestrate(options(workingDir, client, 'force'));
+
+    const first = report.chapters[0];
+    expect(first?.escalated).toBe(true);
+    expect(first?.rejections).toBe(0);
+    expect(first?.concepts).toBe(1);
+
+    const concepts = JSON.parse(
+      readFileSync(
+        join(workingDir, 'packs', 'knowledge', 'demo-knowledge', 'concepts.json'),
+        'utf8',
+      ),
+    ) as Array<{ id: string }>;
+    expect(concepts.map((concept) => concept.id)).toContain('addition');
+  });
+
+  it('writes the coverage of every chapter next to its health report', async () => {
+    const workingDir = makeWorkingDir();
+    const client = new FakeLlmClient((request: LlmRequest<never>) =>
+      fakeExtraction(request.prompt),
+    );
+    await orchestrate(options(workingDir, client, 'force'));
+
+    const coverage = JSON.parse(
+      readFileSync(
+        join(workingDir, 'review', 'chapters', 'chapter-1-whole-numbers', 'coverage.json'),
+        'utf8',
+      ),
+    ) as { teachingSections: number; coverageRatio: number };
+    expect(coverage.teachingSections).toBe(0);
+    expect(coverage.coverageRatio).toBe(1);
+
+    const health = JSON.parse(
+      readFileSync(
+        join(workingDir, 'review', 'chapters', 'chapter-1-whole-numbers', 'health.json'),
+        'utf8',
+      ),
+    ) as { statedObjectives: number; coverageRatio: number };
+    expect(health.statedObjectives).toBe(0);
+    expect(health.coverageRatio).toBe(1);
+
+    const bookCoverage = JSON.parse(
+      readFileSync(join(workingDir, 'review', 'coverage-report.json'), 'utf8'),
+    ) as { chapters: unknown[] };
+    expect(bookCoverage.chapters).toHaveLength(2);
   });
 });

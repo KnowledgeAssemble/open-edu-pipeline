@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyMerge } from './merge.js';
+import { applyMerge, buildMergePrompt, compactSummary } from './merge.js';
 import type { VerifiedConcept } from './verify.js';
 
 function concept(id: string, chapterId: string, title = id): VerifiedConcept {
@@ -18,6 +18,22 @@ const chapterText = new Map<string, string>([
   ['unit-1', '# Unit 1\n\nA fraction represents part of a whole.'],
   ['unit-2', '# Unit 2\n\nA numerator is the top number.'],
 ]);
+
+describe('merge prompt payload', () => {
+  it('carries the verbatim excerpt of every concept so evidence can be grounded', () => {
+    const concepts = [concept('fraction', 'unit-1', 'Fraction')];
+    const summary = compactSummary(concepts);
+    expect(summary[0]?.excerpt).toBe('Fraction');
+    expect(summary[0]?.chapterId).toBe('unit-1');
+  });
+
+  it('tells the model to copy evidence verbatim from the concept excerpt', () => {
+    const prompt = buildMergePrompt(compactSummary([concept('fraction', 'unit-1', 'Fraction')]));
+    expect(prompt).toContain('copied verbatim from the excerpt field');
+    expect(prompt).toContain('Never paraphrase');
+    expect(prompt).toContain('Fraction');
+  });
+});
 
 describe('applyMerge', () => {
   it('keeps all concepts unchanged when nothing is merged', () => {

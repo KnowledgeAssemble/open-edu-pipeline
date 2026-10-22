@@ -15,6 +15,17 @@ export interface ChapterReport {
   objectives: number;
   rejections: number;
   pendingHuman: boolean;
+  /** Learning objectives the chapter states in its source. */
+  statedObjectives: number;
+  /** Stated objectives the extraction missed. */
+  objectiveGap: number;
+  /** Numbered teaching sections in the chapter. */
+  teachingSections: number;
+  /** Teaching sections that carry at least one concept. */
+  coveredSections: number;
+  /** coveredSections / teachingSections. */
+  coverageRatio: number;
+  lowCoverage: boolean;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
   estimatedCostUsd: number;

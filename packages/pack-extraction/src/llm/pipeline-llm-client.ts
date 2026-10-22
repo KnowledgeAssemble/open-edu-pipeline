@@ -50,6 +50,7 @@ export class PipelineLlmClient implements LlmClient {
       request.schema,
       {
         temperature,
+        ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       },
     );
 
