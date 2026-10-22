@@ -38,10 +38,11 @@ Source document
     │                     deterministic result already has ≥1 concept and ≥1 objective)
     ▼
 3. Verify                 deterministic: id assignment, verbatim excerpt grounding,
-    │                     provenance, same-chapter objective links
+    │                     provenance, objective→concept links, coverage of the chapter
     ▼
 4. Escalate               LLM escalation tier, stage alias `concept_enrichment`, only for
-    │                     chapters that failed Stage 3; failure reasons are fed back
+    │                     chapters with a rejected item or a coverage gap; failure
+    │                     reasons and uncovered sections are fed back
     ▼
 5. Merge                  LLM fast tier, stage alias `review`: duplicate clusters +
     │                     cross-chapter prerequisite links (evidence-grounded, cycle-checked)
@@ -125,12 +126,14 @@ Under `output/<manifest.id>/`:
 | `source-model/chapters.json`             | Deterministic chapter segmentation (id, title, pages, markdown)   |
 | `cache/llm/<stage>/<chapterId>.json`     | Per-stage response cache (+ `.meta.json`); free resume/replay     |
 | `review/run-report.json`                 | Per-chapter + totals: tokens, cost, cache hits, escalations, exit |
-| `review/chapters/<slug>/health.json`     | Per-chapter health, `usedLlm`, `escalated`, `cacheHit`            |
+| `review/chapters/<slug>/health.json`     | Per-chapter health, `usedLlm`, `escalated`, `cacheHit`, coverage  |
 | `review/chapters/<slug>/rejections.json` | Rejected items and reasons                                        |
+| `review/chapters/<slug>/coverage.json`   | Stated vs extracted objectives, covered teaching sections, losses |
 | `review/knowledge-model.json`            | Verified concepts + objectives                                    |
 | `review/curriculum-model.json`           | Assembled curriculum model (or `null`)                            |
 | `review/merge-map.json`                  | Duplicate clusters + finalized ids                                |
 | `review/unresolved-prereqs.json`         | Dropped prerequisite links and reasons                            |
+| `review/coverage-report.json`            | Per-chapter coverage: stated objectives, section coverage, gaps   |
 | `review/glossary-candidates.json`        | Glossary candidates derived from concepts                         |
 | `review/human-review-flags.json`         | Rejections + pending-human chapters                               |
 | `review/fidelity-report.json`            | `llm-assisted` or `pending-llm`                                   |
@@ -146,11 +149,44 @@ Under `output/<manifest.id>/`:
   chapters replay for free. `--force` bypasses the cache.
 - **Retries.** Bounded exponential backoff around provider calls (pipeline-llm exposes none);
   the underlying SDK's own transient retries still apply.
+- **Output ceiling.** Extraction and merge calls ask for a larger output budget than the
+  stage default (16 384 and 8 192 tokens): a long chapter yields many concepts and the
+  escalation retry yields more, which overflows the default 4 096-token stage budget. Set
+  `LLM_MAX_OUTPUT_TOKENS` when the provider or model caps output below the default.
 - **Unresolved duplicates.** A chapter-scoped temporary concept id that the merge does not
   cluster is finalized to a stable id and kept in the knowledge pack, but excluded from
   curriculum-unit concept refs — no concept is silently dropped.
 - **Provenance.** Every concept/objective carries a verbatim source excerpt validated against
   the chapter text; packs stay `derivedFrom: "document"`.
+- **Chapter ids.** A chapter id is the slugified title of the heading the table of contents
+  matched (`1-reading-understanding-forming-and-writing-numbers`). Markdown-table contents are
+  read cell-wise, so serial-number and page-number columns never leak into a title.
+- **Objectives.** The chapter's stated learning objectives are extracted one per objective
+  (one per bullet when the chapter lists them, nested bullets included) and never merged into
+  a single objective. A chapter that states N objectives and yields fewer is not healthy.
+  The rule is structural, not only a prompt request: when a model's excerpt covers a parent
+  bullet _and_ its nested sub-bullets, the verifier splits that excerpt back into one
+  objective per stated bullet, so the count holds whatever the model returns. When the text
+  occurs more than once in the chapter, the occurrence spanning the most bullets wins.
+- **Coverage.** Precision (every excerpt is grounded) is not enough on its own: the verifier
+  also measures how much of the chapter was captured — stated objectives vs extracted
+  objectives, and numbered teaching sections vs sections carrying a concept. Stated objectives
+  are the bullets under each objective heading, and an objective block ends at the next heading
+  of any level, so a chapter-level "## Learning Objectives" heading does not count every bullet
+  in the chapter. A chapter escalates when it drops a stated objective, loses a section to a
+  rejection, or covers less than half the numbered teaching sections; individual uncovered
+  sections are named in the retry prompt but do not by themselves trigger it. Gaps the retry
+  does not close leave the chapter `pending-human`.
+- **Coverage applies to LLM attempts.** The recall gates measure what a model missed, so the
+  deterministic extractor keeps only the precision gates (`objectives ≥ 1`, `< 30%` rejected).
+  Its coverage is still recorded in the review artifacts, so a `--no-llm` run reports the gap
+  without failing on it.
+- **Objective links.** An objective links the concepts it practises — the terms the model
+  named, else the concepts of the same teaching section, else a distinctive-word match. It is
+  never linked to every concept of the chapter.
+- **Prerequisite evidence.** The merge stage receives each concept's verbatim excerpt and must
+  copy the link evidence from it, so a prerequisite link can pass the grounding check instead
+  of being dropped as ungrounded.
 - **Exit code.** 0 on success; 1 if the run is aborted (e.g. budget), packs fail validation
   (with `--validate`), no curriculum units are emitted, or any `pending-human` chapter is
   present without `--allow-partial`.

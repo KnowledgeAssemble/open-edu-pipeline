@@ -34,6 +34,8 @@ import {
 } from '../stages/extract.js';
 import type { ChapterExtraction } from '../stages/extract.js';
 import { verifyExtraction } from '../stages/verify.js';
+import type { VerifyChapterResult } from '../stages/verify.js';
+import type { CoverageReport } from '../stages/coverage.js';
 import { shouldEscalate } from '../stages/escalate.js';
 import type { VerifiedConcept, VerifiedObjective, Rejection } from '../stages/verify.js';
 import {
@@ -97,6 +99,7 @@ interface ChapterRun {
   rejections: Rejection[];
   pendingHuman: boolean;
   report: ChapterReport;
+  coverage: CoverageReport;
 }
 
 interface CallContext {
@@ -138,6 +141,22 @@ async function withRetry<T>(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/** Output ceiling for extraction: a long chapter yields many concepts and objectives. */
+const EXTRACTION_MAX_TOKENS = 16384;
+
+/** Output ceiling for the cross-chapter merge. */
+const MERGE_MAX_TOKENS = 8192;
+
+/** Extraction ceiling, lowered by `LLM_MAX_OUTPUT_TOKENS` for capped models. */
+function extractionMaxTokens(tier: TierConfig): number {
+  return tier.maxOutputTokens ?? EXTRACTION_MAX_TOKENS;
+}
+
+/** Merge ceiling, lowered by `LLM_MAX_OUTPUT_TOKENS` for capped models. */
+function mergeMaxTokens(tier: TierConfig): number {
+  return tier.maxOutputTokens ?? MERGE_MAX_TOKENS;
+}
+
 async function callStructured<T>(args: {
   ctx: CallContext;
   stage: LlmStage;
@@ -148,6 +167,7 @@ async function callStructured<T>(args: {
   promptVersion: string;
   schemaVersion: string;
   model: string;
+  maxTokens?: number;
 }): Promise<{ data: T; cacheHit: boolean; usage: CallEstimate }> {
   const key = cacheKey({
     chapterMarkdown: args.prompt,
@@ -183,6 +203,7 @@ async function callStructured<T>(args: {
         prompt: args.prompt,
         schema: args.schema,
         temperature: 0,
+        ...(args.maxTokens === undefined ? {} : { maxTokens: args.maxTokens }),
       }),
     args.ctx,
     args.stage,
@@ -219,10 +240,29 @@ function deterministicExtraction(chapter: Chapter, manifest: SourceManifest): Ch
     objectives: knowledge.statements.map((statement) => ({
       statement: statement.statement,
       excerpt: statement.statement,
+      conceptTerms: [],
     })),
     examples: [],
     prerequisites: [],
   };
+}
+
+/**
+ * The escalation retry only replaces the fast attempt when it extracted more of
+ * the chapter. A weaker retry must not throw away grounded content.
+ */
+function isBetterAttempt(candidate: VerifyChapterResult, current: VerifyChapterResult): boolean {
+  // Health dominates: a clean retry beats a larger attempt that still has a gap,
+  // a lost section or a rejected item. Only two unhealthy attempts are compared on
+  // how much they extracted.
+  if (candidate.healthy !== current.healthy) return candidate.healthy;
+  if (candidate.concepts.length !== current.concepts.length) {
+    return candidate.concepts.length > current.concepts.length;
+  }
+  if (candidate.objectives.length !== current.objectives.length) {
+    return candidate.objectives.length > current.objectives.length;
+  }
+  return candidate.rejections.length < current.rejections.length;
 }
 
 function commitIds(target: Set<string>, source: Set<string>): void {
@@ -280,7 +320,10 @@ async function processChapter(args: {
   const { chapter, manifest, usedConceptIds } = args;
   const detExtraction = deterministicExtraction(chapter, manifest);
   const detTrial = new Set(usedConceptIds);
-  const detVerify = verifyExtraction(chapter, detExtraction, { usedConceptIds: detTrial });
+  const detVerify = verifyExtraction(chapter, detExtraction, {
+    usedConceptIds: detTrial,
+    enforceCoverage: false,
+  });
   const detSufficient = detVerify.concepts.length >= 1 && detVerify.objectives.length >= 1;
   const llmAllowed = args.llmMode !== 'off' && args.client !== undefined;
   const wantLlm = llmAllowed && (!detSufficient || args.llmMode === 'force');
@@ -300,6 +343,12 @@ async function processChapter(args: {
     objectives: detVerify.objectives.length,
     rejections: detVerify.rejections.length,
     pendingHuman: false,
+    statedObjectives: detVerify.coverage.statedObjectives,
+    objectiveGap: detVerify.coverage.objectiveGap,
+    teachingSections: detVerify.coverage.teachingSections,
+    coveredSections: detVerify.coverage.coveredSections,
+    coverageRatio: detVerify.coverage.coverageRatio,
+    lowCoverage: detVerify.coverage.lowCoverage,
     estimatedInputTokens: 0,
     estimatedOutputTokens: 0,
     estimatedCostUsd: 0,
@@ -308,6 +357,12 @@ async function processChapter(args: {
   if (!wantLlm) {
     commitIds(usedConceptIds, detTrial);
     report.pendingHuman = !detVerify.healthy;
+    report.statedObjectives = detVerify.coverage.statedObjectives;
+    report.objectiveGap = detVerify.coverage.objectiveGap;
+    report.teachingSections = detVerify.coverage.teachingSections;
+    report.coveredSections = detVerify.coverage.coveredSections;
+    report.coverageRatio = detVerify.coverage.coverageRatio;
+    report.lowCoverage = detVerify.coverage.lowCoverage;
     return {
       chapter,
       concepts: detVerify.concepts,
@@ -315,6 +370,7 @@ async function processChapter(args: {
       rejections: detVerify.rejections,
       pendingHuman: !detVerify.healthy,
       report,
+      coverage: detVerify.coverage,
     };
   }
 
@@ -328,6 +384,7 @@ async function processChapter(args: {
     promptVersion: EXTRACT_PROMPT_VERSION,
     schemaVersion: EXTRACT_SCHEMA_VERSION,
     model: args.tierConfig.fast,
+    maxTokens: extractionMaxTokens(args.tierConfig),
   });
   report.usedLlm = true;
   report.cacheHit = call.cacheHit;
@@ -336,12 +393,16 @@ async function processChapter(args: {
   report.estimatedCostUsd += call.usage.costUsd;
 
   const fastTrial = new Set(usedConceptIds);
-  let verify = verifyExtraction(chapter, call.data, { usedConceptIds: fastTrial });
+  const fastVerify = verifyExtraction(chapter, call.data, { usedConceptIds: fastTrial });
+  let verify = fastVerify;
 
-  if (!shouldEscalate(verify)) {
+  if (!shouldEscalate(fastVerify)) {
     commitIds(usedConceptIds, fastTrial);
   } else {
-    const failures = verify.rejections.map((rejection) => `${rejection.reason}: ${rejection.item}`);
+    const failures = [
+      ...fastVerify.rejections.map((rejection) => `${rejection.reason}: ${rejection.item}`),
+      ...fastVerify.failures,
+    ];
     const escalated = await callStructured({
       ctx: args.ctx,
       stage: ESCALATION_STAGE,
@@ -352,20 +413,36 @@ async function processChapter(args: {
       promptVersion: EXTRACT_ESCALATION_PROMPT_VERSION,
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       model: args.tierConfig.escalation,
+      maxTokens: extractionMaxTokens(args.tierConfig),
     });
     report.escalated = true;
     report.estimatedInputTokens += escalated.usage.inputTokens;
     report.estimatedOutputTokens += escalated.usage.outputTokens;
     report.estimatedCostUsd += escalated.usage.costUsd;
     const escalationTrial = new Set(usedConceptIds);
-    verify = verifyExtraction(chapter, escalated.data, { usedConceptIds: escalationTrial });
-    commitIds(usedConceptIds, escalationTrial);
+    const escalatedVerify = verifyExtraction(chapter, escalated.data, {
+      usedConceptIds: escalationTrial,
+    });
+    // The retry replaces the fast attempt only when it extracted more; a weaker
+    // escalation must not throw away grounded content the fast tier produced.
+    if (isBetterAttempt(escalatedVerify, fastVerify)) {
+      verify = escalatedVerify;
+      commitIds(usedConceptIds, escalationTrial);
+    } else {
+      commitIds(usedConceptIds, fastTrial);
+    }
   }
 
   report.concepts = verify.concepts.length;
   report.objectives = verify.objectives.length;
   report.rejections = verify.rejections.length;
   report.pendingHuman = !verify.healthy;
+  report.statedObjectives = verify.coverage.statedObjectives;
+  report.objectiveGap = verify.coverage.objectiveGap;
+  report.teachingSections = verify.coverage.teachingSections;
+  report.coveredSections = verify.coverage.coveredSections;
+  report.coverageRatio = verify.coverage.coverageRatio;
+  report.lowCoverage = verify.coverage.lowCoverage;
 
   return {
     chapter,
@@ -374,6 +451,7 @@ async function processChapter(args: {
     rejections: verify.rejections,
     pendingHuman: !verify.healthy,
     report,
+    coverage: verify.coverage,
   };
 }
 
@@ -392,8 +470,15 @@ function writeChapterReview(workingDir: string, run: ChapterRun): void {
     concepts: run.concepts.length,
     objectives: run.objectives.length,
     rejections: run.rejections.length,
+    statedObjectives: run.coverage.statedObjectives,
+    objectiveGap: run.coverage.objectiveGap,
+    teachingSections: run.coverage.teachingSections,
+    coveredSections: run.coverage.coveredSections,
+    coverageRatio: run.coverage.coverageRatio,
+    lowCoverage: run.coverage.lowCoverage,
   });
   writeJson(join(dir, 'rejections.json'), { items: run.rejections });
+  writeJson(join(dir, 'coverage.json'), run.coverage);
 }
 
 function buildConceptDocs(
@@ -540,6 +625,12 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
         objectives: 0,
         rejections: 0,
         pendingHuman: false,
+        statedObjectives: 0,
+        objectiveGap: 0,
+        teachingSections: 0,
+        coveredSections: 0,
+        coverageRatio: 1,
+        lowCoverage: false,
         estimatedInputTokens: fastEstimate.inputTokens + escalationEstimate.inputTokens,
         estimatedOutputTokens: fastEstimate.outputTokens + escalationEstimate.outputTokens,
         estimatedCostUsd: fastEstimate.costUsd + escalationEstimate.costUsd,
@@ -659,6 +750,7 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
         promptVersion: MERGE_PROMPT_VERSION,
         schemaVersion: MERGE_SCHEMA_VERSION,
         model: options.tierConfig.fast,
+        maxTokens: mergeMaxTokens(options.tierConfig),
       });
       merge = applyMerge({ concepts: allConcepts, result: call.data, chapterText });
       report.totals.estimatedInputTokens += call.usage.inputTokens;
@@ -704,6 +796,29 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   writeJson(join(reviewDir, 'glossary-candidates.json'), glossary);
   writeJson(join(reviewDir, 'merge-map.json'), merge.mergeMap);
   writeJson(join(reviewDir, 'unresolved-prereqs.json'), { links: merge.unresolvedPrereqs });
+  writeJson(join(reviewDir, 'coverage-report.json'), {
+    chapters: runs.map((run) => ({
+      id: run.chapter.id,
+      statedObjectives: run.coverage.statedObjectives,
+      extractedObjectives: run.coverage.extractedObjectives,
+      objectiveGap: run.coverage.objectiveGap,
+      teachingSections: run.coverage.teachingSections,
+      coveredSections: run.coverage.coveredSections,
+      coverageRatio: run.coverage.coverageRatio,
+      lowCoverage: run.coverage.lowCoverage,
+      uncoveredSections: run.coverage.uncoveredSections,
+      lostSections: run.coverage.lostSections,
+    })),
+    totals: {
+      statedObjectives: runs.reduce((sum, run) => sum + run.coverage.statedObjectives, 0),
+      objectiveGap: runs.reduce((sum, run) => sum + run.coverage.objectiveGap, 0),
+      teachingSections: runs.reduce((sum, run) => sum + run.coverage.teachingSections, 0),
+      coveredSections: runs.reduce((sum, run) => sum + run.coverage.coveredSections, 0),
+      lowCoverageChapters: runs
+        .filter((run) => run.coverage.lowCoverage)
+        .map((run) => run.chapter.id),
+    },
+  });
 
   const curriculum = buildCurriculum(
     runs,
@@ -797,6 +912,20 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     }
     if (run.pendingHuman) {
       flagItems.push({ type: 'pending-human', id: run.chapter.id, note: 'chapter unhealthy' });
+    }
+    if (run.coverage.lowCoverage) {
+      flagItems.push({
+        type: 'low-coverage',
+        id: run.chapter.id,
+        note: `${run.coverage.coveredSections}/${run.coverage.teachingSections} teaching sections covered`,
+      });
+    }
+    if (run.coverage.objectiveGap > 0) {
+      flagItems.push({
+        type: 'objective-gap',
+        id: run.chapter.id,
+        note: `${run.coverage.objectiveGap} stated objectives not extracted`,
+      });
     }
   }
   writeJson(join(reviewDir, 'human-review-flags.json'), {

@@ -7,6 +7,8 @@ export interface LlmRequest<T> {
   prompt: string;
   schema: z.ZodType<T>;
   temperature?: number;
+  /** Output token ceiling; long chapters need more than the stage default. */
+  maxTokens?: number;
 }
 
 export interface LlmResponse<T> {

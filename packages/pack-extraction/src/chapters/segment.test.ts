@@ -72,6 +72,37 @@ describe('segmentChapters', () => {
     expect(result.chapters.map((chapter) => chapter.title)).toEqual(['NUMBERS', 'SHAPES']);
   });
 
+  it('maps a markdown table contents onto the chapter headings', () => {
+    const markdown = [
+      '# Contents',
+      '',
+      '| Sl. No. | Title of Lesson | Page No. |',
+      '| :--- | :--- | :--- |',
+      '| 1. | Numbers | 1 |',
+      '| 2. | Addition and subtraction of numbers | 31 |',
+      '',
+      '# 1. NUMBERS',
+      '',
+      'numbers body',
+      '',
+      '# 2. ADDITION AND SUBTRACTION OF NUMBERS',
+      '',
+      '### We will learn in this lesson',
+      '- Add numbers.',
+      '',
+      '#### Addition',
+      '',
+      'sub body',
+    ].join('\n');
+    const result = segmentChapters(markdown);
+    expect(result.strategy).toBe('toc');
+    expect(result.chapters.map((chapter) => chapter.id)).toEqual([
+      '1-numbers',
+      '2-addition-and-subtraction-of-numbers',
+    ]);
+    expect(result.chapters[1]?.markdown).toContain('### We will learn in this lesson');
+  });
+
   it('carries page bounds when the markdown has form feeds', () => {
     const markdown = ['# UNIT 1', '', 'one', '\f', '# UNIT 2', '', 'two'].join('\n');
     const result = segmentChapters(markdown);
@@ -102,6 +133,10 @@ describe('headingMatchScore', () => {
   it('scores an unrelated heading low', () => {
     expect(headingMatchScore('Multiplication', 'MEASUREMENT')).toBeLessThan(0.6);
   });
+
+  it('does not let a shorter prefix heading outscore the full chapter heading', () => {
+    expect(headingMatchScore('Addition and subtraction of numbers', 'Addition')).toBeLessThan(0.6);
+  });
 });
 
 describe('toc helpers', () => {
@@ -113,6 +148,30 @@ describe('toc helpers', () => {
 
   it('parses entries and strips page numbers', () => {
     expect(parseTocEntries('1. Numbers 1\n2. Shapes ..... 5')).toEqual(['Numbers', 'Shapes']);
+  });
+
+  it('parses a markdown table contents into entry titles', () => {
+    const toc = [
+      '| Sl. No. | Title of Lesson | Page No. |',
+      '| :--- | :--- | :--- |',
+      '| 1. | Reading Numbers | 1 |',
+      '| | Assessment Sheet - 1 | |',
+      '| 2. | Addition and subtraction of numbers | 31 |',
+    ].join('\n');
+    expect(parseTocEntries(toc)).toEqual([
+      'Reading Numbers',
+      'Assessment Sheet - 1',
+      'Addition and subtraction of numbers',
+    ]);
+  });
+
+  it('keeps the title cell when the serial column holds text', () => {
+    const toc = [
+      '| Lesson | Title of Lesson | Page No. |',
+      '| :--- | :--- | :--- |',
+      '| Lesson 1 | Reading Numbers | 1 |',
+    ].join('\n');
+    expect(parseTocEntries(toc)).toEqual(['Reading Numbers']);
   });
 
   it('parses a page range', () => {

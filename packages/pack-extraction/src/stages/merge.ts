@@ -27,6 +27,8 @@ export interface MergeConceptSummary {
   id: string;
   title: string;
   summary: string;
+  /** Verbatim chapter text the concept was extracted from. */
+  excerpt: string;
   chapterId: string;
 }
 
@@ -58,11 +60,16 @@ export interface MergeApplyResult {
   unresolvedDuplicateIds: Set<string>;
 }
 
+/** Excerpt chars kept in the merge payload: enough for a verbatim evidence quote,
+ *  bounded so a full-book merge prompt stays inside the model's context. */
+const MERGE_EXCERPT_CHARS = 300;
+
 export function compactSummary(concepts: VerifiedConcept[]): MergeConceptSummary[] {
   return concepts.map((concept) => ({
     id: concept.id,
     title: concept.title,
     summary: concept.summary.slice(0, 200),
+    excerpt: concept.excerpt.slice(0, MERGE_EXCERPT_CHARS),
     chapterId: concept.chapterId,
   }));
 }
@@ -72,7 +79,8 @@ export function buildMergePrompt(concepts: MergeConceptSummary[]): string {
     'You compare concepts extracted from a whole book and return JSON only.',
     'Two tasks:',
     '1. duplicateClusters: groups of ids that name the same concept; pick one canonicalId.',
-    '2. prerequisiteLinks: cross-chapter links { fromId, toId, evidenceExcerpt } where toId must be understood before fromId. evidenceExcerpt MUST be copied verbatim from one of the two chapters.',
+    '2. prerequisiteLinks: cross-chapter links { fromId, toId, evidenceExcerpt } where toId must be understood before fromId.',
+    'evidenceExcerpt MUST be copied verbatim from the excerpt field of the fromId or toId concept (that field is the verbatim chapter text). Never paraphrase, summarize, or rewrite it.',
     'Never invent ids that are not in the list. Empty arrays are valid.',
     '',
     JSON.stringify({ concepts }),

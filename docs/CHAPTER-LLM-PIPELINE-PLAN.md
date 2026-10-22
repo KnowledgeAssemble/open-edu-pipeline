@@ -86,40 +86,53 @@ Input: only that chapter's markdown. Temperature 0, structured output validated 
 ```json
 {
   "concepts":      [ { "term": "fraction", "summary": "…", "excerpt": "verbatim ≤ 600 chars" } ],
-  "objectives":    [ { "statement": "…",    "excerpt": "verbatim ≤ 600 chars" } ],
+  "objectives":    [ { "statement": "…",    "excerpt": "verbatim ≤ 600 chars", "conceptTerms": [ "…" ] } ],
   "examples":      [ { "term": "fraction", "excerpt": "verbatim ≤ 600 chars" } ],
   "prerequisites": [ { "fromTerm": "…",    "toTerm": "…", "excerpt": "verbatim ≤ 600 chars" } ]
 }
 ```
 
-Rules given to the model: excerpts MUST be copied verbatim from the chapter; do not invent terms; do not normalize spelling; no bloom/pedagogy; empty arrays are valid answers.
+Rules given to the model: excerpts MUST be copied verbatim from the chapter; do not invent terms; do not normalize spelling; no bloom/pedagogy; empty arrays are valid answers; one objective per stated objective bullet (nested bullets included — never merged, and a parent bullet with lettered sub-bullets states one objective per sub-bullet); at least one concept per numbered teaching section; each objective lists the `conceptTerms` it practises.
 
 Notes:
 - The adapter serves this logical stage from the pipeline-llm `concept_map` stage (see §2).
 - The model is only asked for `term` / `summary` / `excerpt` / statements / prerequisite term pairs. Pack-required fields the model is not asked to produce (`domainTags`, objective `requiresIntents`, all ids) are injected deterministically in Stage 3. `domainTags` comes from `manifest.subject` (default `["mathematics"]`).
 - `excerpt` has a hard cap of 2000 chars (`ConceptSourceSchema`); 600 is only the prompt-level target.
+- **Output budget** — extraction and merge calls request a larger ceiling than the pipeline-llm stage default of 4 096 tokens (16 384 for extraction, 8 192 for the merge): a long chapter yields many concepts, and the escalation retry yields more, which overflows the default budget mid-JSON and loses the whole attempt. `LLM_MAX_OUTPUT_TOKENS` lowers the ceiling for a provider or model with a smaller output cap.
 
 ### Stage 3 — Deterministic verification (the trust boundary)
 
 For each item, in order:
 
 1. **Zod parse** — schema-violating items rejected (reason: `schema`).
-2. **Excerpt-grounding** — accept when `normalizeWs(excerpt)` is a substring of **either** `normalizeWs(chapterMarkdown)` **or** `normalizeWs(stripMarkdown(chapterMarkdown))`. `normalizeWs` collapses all whitespace (including form-feed `\f`) to single spaces and trims; `stripMarkdown` removes emphasis/heading/backtick/table markers (`*`, `_`, `` ` ``, leading `#`, `|`). Reject with reason `excerpt-not-found` only if neither matches. This is the hallucination filter; it costs zero tokens and tolerates markdown formatting differences.
+2. **Excerpt-grounding** — accept when `normalizeWs(excerpt)` is a substring of **either** `normalizeWs(chapterMarkdown)` **or** `normalizeWs(stripMarkdown(chapterMarkdown))`. `normalizeWs` collapses all whitespace (including form-feed `\f`) to single spaces and trims; `stripMarkdown` removes emphasis/heading/backtick/table/LaTeX markers (`*`, `_`, `` ` ``, leading `#`, `|`, `$`). Reject with reason `excerpt-not-found` only if neither matches. This is the hallucination filter; it costs zero tokens and tolerates markdown formatting differences.
 3. **Ids** — concept id = `slugify(term)`; the first occurrence in book order wins the bare id. Later same-slug duplicates carry a temporary id `<chapterSlug>--<termSlug>` (hyphen-only, to respect the concept-id regex `^[a-z0-9][a-z0-9_-]*$`) until Stage 5 merges them. Any temp id Stage 5 leaves unresolved is finalized to a stable pack-legal id (`<chapterSlug>-<termSlug>`), recorded in `review/merge-map.json`, and **kept in the knowledge pack** — but excluded from curriculum-unit concept refs. No invalid or unresolved-duplicate id reaches emit, and no concept is silently dropped.
 4. **Provenance** — `ConceptSourceSchema { documentId, section: chapter slug, page?, excerpt }` resolved deterministically from the excerpt's location in the page map. `page` is emitted only when it is a positive integer (schema requires `.positive()`); otherwise it is omitted. `section` is the reliable anchor; `page` is best-effort.
 5. **Curriculum assembly** — one curriculum unit per chapter that has **≥1 grounded objective** (chapters with zero objectives are excluded — see Stage 4/6); objectives link ONLY to concepts grounded in the same chapter; `domainTags` injected from `manifest.subject`; `bloomLevel: "understand"`, `requiresIntents: ["understand"]` (deterministic defaults — classification is §24 territory). Objective `concepts` may be empty (schema default) when a chapter has objectives but no grounded concepts.
+   **Objective links are scoped, not chapter-wide.** An objective links the concepts it practises: the `conceptTerms` the extraction named (resolved against the extracted concepts; unknown terms are dropped), else the concepts of the same teaching section, else a distinctive-word match (words that appear in many concept titles carry no signal and are ignored). Linking every chapter concept to every objective says nothing and is replaced by this rule.
 
-Chapter health: `objectives ≥ 1` AND `< 30%` items rejected. Unhealthy chapters go to Stage 4.
+Chapter health: `objectives ≥ 1` AND `< 30%` items rejected AND **coverage gates** (below). Unhealthy chapters go to Stage 4.
+
+**Coverage gates (recall, not just precision).** Grounding proves every excerpt is real; it says nothing about what the extraction *missed*. Stage 3 therefore also measures, per chapter:
+
+- **Stated objectives** — every bullet under a "We will learn …" / "Learning Objectives" heading, nested bullets included. Each block ends at the next heading of any level, so a shallower "## Learning Objectives" heading does not count the bullets of every section beneath it, and sibling objective headings are summed. The chapter is unhealthy when fewer objectives are extracted than the chapter states.
+- **Objective granularity is structural, not only a prompt request** — a chapter states its objectives as bullets, often a parent bullet with nested sub-bullets, and a model that copies the whole block into one excerpt states several objectives in one. When an objective's excerpt spans more than one list item, Stage 3 splits it back into one objective per stated bullet (the bullet text becomes the statement and the excerpt; the model's own statement is dropped, since it cannot be attributed to a single bullet). If the excerpt occurs more than once, the occurrence spanning the most bullets is used. The model's `conceptTerms` are spread over the split objectives by naming the bullet verbatim, else by content-word overlap with the concept title, so each concept lands on the objective it belongs to.
+- **Teaching sections** — numbered content sections (`1.1`, `2.10`). A section is covered when an accepted concept's excerpt comes from it (a fact inside a "Remember" box counts for the section that contains the box). The chapter is unhealthy when the covered share drops below 50%.
+- **Lost sections** — a section whose only concept attempt was rejected. The chapter is unhealthy until that section carries a concept again.
+
+The report is written to `review/chapters/<slug>/coverage.json` (and aggregated in `review/coverage-report.json`), so the coverage gap is visible in the artifact, not just implied by a rejection count. The recall gates apply to LLM attempts only: the deterministic extractor keeps the precision gates, and its coverage is recorded for review but does not make the chapter unhealthy.
 
 ### Stage 4 — Escalation (conditional, once)
 
 Retry the whole chapter once on the escalation tier (served from the pipeline-llm `concept_enrichment` stage; see §2). Same Stage 3 verification. Still unhealthy → the chapter is recorded as `pending-human` under `review/chapters/<slug>/`, its grounded concepts are still kept in the knowledge pack, and the run continues. A pending-human chapter with zero grounded objectives is **excluded from curriculum units** (never emitted as a unit), because `CurriculumUnitSchema.objectives` requires ≥1.
 
+**Escalation trigger.** A chapter escalates when the fast tier left something material on the table: a rejected item, a stated objective that was not extracted, a section that lost its only concept, or coverage below half the numbered teaching sections. Individual uncovered sections are named in the escalation prompt but do not by themselves trigger a retry, so a nearly complete chapter does not spend an extra call for one thin section. The retry replaces the fast attempt when it is healthy and the fast attempt is not; between two attempts of equal health it wins by more concepts, then more objectives, then fewer rejections. A weaker retry never throws away grounded content.
+
 ### Stage 5 — Cross-chapter merge (LLM, compact input only)
 
-Input is never markdown — a compact JSON book summary: per concept `{ id, title, summary ≤ 200 chars, chapterId }`. Hard input cap ~50k tokens; if exceeded, merge per chapter-cluster then once across clusters (hierarchical, same schema — noted as future work if ever needed).
+Input is never markdown — a compact JSON book summary: per concept `{ id, title, summary ≤ 200 chars, excerpt ≤ 300 chars, chapterId }`. The excerpt is the concept's verbatim source text: without it the model can only paraphrase, and a paraphrased `evidenceExcerpt` can never pass the grounding check, so every prerequisite link was dropped as `ungrounded-evidence`. Hard input cap ~50k tokens; if exceeded, merge per chapter-cluster then once across clusters (hierarchical, same schema — noted as future work if ever needed).
 
-LLM returns: duplicate clusters (`{ canonicalId, duplicateIds }`) and cross-chapter prerequisite links (`{ fromId, toId, evidenceExcerpt }` — evidence is **required**).
+LLM returns: duplicate clusters (`{ canonicalId, duplicateIds }`) and cross-chapter prerequisite links (`{ fromId, toId, evidenceExcerpt }` — evidence is **required**, copied verbatim from the `excerpt` field of the `fromId`/`toId` concept).
 
 Deterministic apply: merge clusters into canonical ids (provenance of the canonical = its first grounded excerpt; duplicates' excerpts recorded in `review/merge-map.json`); apply a prerequisite link only when its `evidenceExcerpt` passes the same excerpt-grounding check (§3 Stage 3 step 2) against one of the two chapters' text — **ungrounded links are dropped** to `review/unresolved-prereqs.json`. Unresolved or unknown-id references likewise go to `review/unresolved-prereqs.json`, never invented. This closes the gap where an invented-but-plausible link between two real ids would otherwise pass validation silently.
 

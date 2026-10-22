@@ -27,6 +27,18 @@ export interface TierConfig {
   provider: string;
   fast: string;
   escalation: string;
+  /**
+   * Output token ceiling for chapter extraction and merge calls. Unset means the
+   * pipeline defaults (16 384 extraction, 8 192 merge). Lower it when the provider
+   * or model caps output below that.
+   */
+  maxOutputTokens?: number;
+}
+
+function positiveInt(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 /**
@@ -34,14 +46,22 @@ export interface TierConfig {
  * convention and `LLM_FAST_MODEL` / `LLM_ESCALATION_MODEL` env vars.
  */
 export function resolveTierConfig(
-  opts: { provider?: string; fastModel?: string; escalationModel?: string } = {},
+  opts: {
+    provider?: string;
+    fastModel?: string;
+    escalationModel?: string;
+    maxOutputTokens?: number;
+  } = {},
 ): TierConfig {
-  return {
+  const config: TierConfig = {
     provider: opts.provider ?? process.env.LLM_PROVIDER ?? DEFAULT_PROVIDER,
     fast: opts.fastModel ?? process.env.LLM_FAST_MODEL ?? DEFAULT_FAST_MODEL,
     escalation:
       opts.escalationModel ?? process.env.LLM_ESCALATION_MODEL ?? DEFAULT_ESCALATION_MODEL,
   };
+  const maxOutputTokens = opts.maxOutputTokens ?? positiveInt(process.env.LLM_MAX_OUTPUT_TOKENS);
+  if (maxOutputTokens !== undefined) config.maxOutputTokens = maxOutputTokens;
+  return config;
 }
 
 export interface ModelPrice {

@@ -53,7 +53,7 @@ function fakeExtraction(prompt: string): unknown {
       .find((line) => line !== '' && !line.startsWith('#')) ?? title;
   return {
     concepts: [{ term: title, summary: firstLine, excerpt: firstLine }],
-    objectives: [{ statement: title, excerpt: firstLine }],
+    objectives: [{ statement: title, excerpt: firstLine, conceptTerms: [] }],
     examples: [],
     prerequisites: [],
   };
@@ -180,5 +180,239 @@ describe('orchestrate (two chapters, fake LLM)', () => {
     });
     expect(exitCode).toBe(0);
     expect(delays).toEqual([10, 20]);
+  });
+
+  it('escalates a chapter whose fast attempt was rejected and keeps the better attempt', async () => {
+    const workingDir = makeWorkingDir();
+    const client = new FakeLlmClient((request: LlmRequest<never>) => {
+      if (request.prompt.includes('rejected by a deterministic verifier')) {
+        return {
+          concepts: [
+            {
+              term: 'Addition',
+              summary: 'combines',
+              excerpt: 'Addition combines two numbers into a sum.',
+            },
+          ],
+          objectives: [
+            {
+              statement: 'Addition',
+              excerpt: 'Addition combines two numbers into a sum.',
+              conceptTerms: [],
+            },
+          ],
+          examples: [],
+          prerequisites: [],
+        };
+      }
+      return {
+        concepts: [{ term: 'Ghost', summary: 'invented', excerpt: 'this text is absent' }],
+        objectives: [
+          {
+            statement: 'Addition',
+            excerpt: 'Addition combines two numbers into a sum.',
+            conceptTerms: [],
+          },
+        ],
+        examples: [],
+        prerequisites: [],
+      };
+    });
+    const { report } = await orchestrate(options(workingDir, client, 'force'));
+
+    const first = report.chapters[0];
+    expect(first?.escalated).toBe(true);
+    expect(first?.rejections).toBe(0);
+    expect(first?.concepts).toBe(1);
+
+    const concepts = JSON.parse(
+      readFileSync(
+        join(workingDir, 'packs', 'knowledge', 'demo-knowledge', 'concepts.json'),
+        'utf8',
+      ),
+    ) as Array<{ id: string }>;
+    expect(concepts.map((concept) => concept.id)).toContain('addition');
+  });
+
+  it('writes the coverage of every chapter next to its health report', async () => {
+    const workingDir = makeWorkingDir();
+    const client = new FakeLlmClient((request: LlmRequest<never>) =>
+      fakeExtraction(request.prompt),
+    );
+    await orchestrate(options(workingDir, client, 'force'));
+
+    const coverage = JSON.parse(
+      readFileSync(
+        join(workingDir, 'review', 'chapters', 'chapter-1-whole-numbers', 'coverage.json'),
+        'utf8',
+      ),
+    ) as { teachingSections: number; coverageRatio: number };
+    expect(coverage.teachingSections).toBe(0);
+    expect(coverage.coverageRatio).toBe(1);
+
+    const health = JSON.parse(
+      readFileSync(
+        join(workingDir, 'review', 'chapters', 'chapter-1-whole-numbers', 'health.json'),
+        'utf8',
+      ),
+    ) as { statedObjectives: number; coverageRatio: number };
+    expect(health.statedObjectives).toBe(0);
+    expect(health.coverageRatio).toBe(1);
+
+    const bookCoverage = JSON.parse(
+      readFileSync(join(workingDir, 'review', 'coverage-report.json'), 'utf8'),
+    ) as { chapters: unknown[] };
+    expect(bookCoverage.chapters).toHaveLength(2);
+  });
+});
+
+const OBJECTIVES_BOOK = [
+  '# Chapter 1 Addition',
+  '',
+  '### We will learn in this lesson',
+  '- Add small numbers.',
+  '- Add large numbers.',
+  '',
+  '### 1.1 Small numbers',
+  '',
+  'Small numbers add quickly.',
+  '',
+  '### 1.2 Large numbers',
+  '',
+  'Large numbers add slowly.',
+].join('\n');
+
+const objectivesManifest: SourceManifest = {
+  ...manifest,
+  id: 'objectives-book',
+  filename: 'objectives.md',
+};
+
+function objectivesOptions(workingDir: string, llmClient: LlmClient, llmMode: 'auto' | 'force') {
+  return {
+    ...options(workingDir, llmClient, llmMode),
+    markdown: OBJECTIVES_BOOK,
+    manifest: objectivesManifest,
+    knowledgePackId: 'objectives-knowledge',
+    curriculumPackId: 'objectives-curriculum',
+  } as const;
+}
+
+function objectivesClient(fast: unknown, escalated: unknown): LlmClient {
+  return new FakeLlmClient((request: LlmRequest<never>) => {
+    if (request.prompt.includes('duplicateClusters')) {
+      return { duplicateClusters: [], prerequisiteLinks: [] };
+    }
+    if (request.prompt.includes('Fix ONLY these problems')) return escalated;
+    return fast;
+  });
+}
+
+describe('escalation attempt selection', () => {
+  it('keeps a healthy retry even when it extracted fewer concepts', async () => {
+    const workingDir = makeWorkingDir();
+    const client = objectivesClient(
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+          { term: 'Addition', summary: 'combining', excerpt: 'Chapter 1 Addition' },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+          { statement: 'Add large numbers.', excerpt: 'Add large numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+    );
+
+    const { exitCode, report } = await orchestrate(objectivesOptions(workingDir, client, 'force'));
+    const chapter = report.chapters[0];
+    expect(chapter?.escalated).toBe(true);
+    expect(chapter?.concepts).toBe(2);
+    expect(chapter?.objectives).toBe(2);
+    expect(chapter?.pendingHuman).toBe(false);
+    expect(exitCode).toBe(0);
+  });
+
+  it('keeps the larger fast attempt when both attempts are unhealthy', async () => {
+    const workingDir = makeWorkingDir();
+    const client = objectivesClient(
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+          { term: 'Addition', summary: 'combining', excerpt: 'Chapter 1 Addition' },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+      {
+        concepts: [
+          {
+            term: 'Small numbers',
+            summary: 'add quickly',
+            excerpt: 'Small numbers add quickly.',
+          },
+          {
+            term: 'Large numbers',
+            summary: 'add slowly',
+            excerpt: 'Large numbers add slowly.',
+          },
+        ],
+        objectives: [
+          { statement: 'Add small numbers.', excerpt: 'Add small numbers.', conceptTerms: [] },
+        ],
+        examples: [],
+        prerequisites: [],
+      },
+    );
+
+    const { exitCode, report } = await orchestrate(objectivesOptions(workingDir, client, 'force'));
+    const chapter = report.chapters[0];
+    expect(chapter?.escalated).toBe(true);
+    expect(chapter?.concepts).toBe(3);
+    expect(chapter?.objectives).toBe(1);
+    expect(chapter?.pendingHuman).toBe(true);
+    expect(exitCode).toBe(1);
   });
 });
