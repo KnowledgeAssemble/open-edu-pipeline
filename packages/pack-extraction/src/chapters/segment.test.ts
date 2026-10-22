@@ -135,9 +135,7 @@ describe('headingMatchScore', () => {
   });
 
   it('does not let a shorter prefix heading outscore the full chapter heading', () => {
-    expect(headingMatchScore('Addition and subtraction of numbers', 'Addition')).toBeLessThan(
-      0.6,
-    );
+    expect(headingMatchScore('Addition and subtraction of numbers', 'Addition')).toBeLessThan(0.6);
   });
 });
 
@@ -165,6 +163,15 @@ describe('toc helpers', () => {
       'Assessment Sheet - 1',
       'Addition and subtraction of numbers',
     ]);
+  });
+
+  it('keeps the title cell when the serial column holds text', () => {
+    const toc = [
+      '| Lesson | Title of Lesson | Page No. |',
+      '| :--- | :--- | :--- |',
+      '| Lesson 1 | Reading Numbers | 1 |',
+    ].join('\n');
+    expect(parseTocEntries(toc)).toEqual(['Reading Numbers']);
   });
 
   it('parses a page range', () => {

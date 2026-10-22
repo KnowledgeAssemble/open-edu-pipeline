@@ -25,14 +25,17 @@ function isTableSeparatorRow(line: string): boolean {
 }
 
 /**
- * The title cell of a markdown table row: the first cell that is neither a
- * separator nor a bare number (serial number / page number column).
+ * The title cell of a markdown table row: the longest cell that is neither a
+ * separator nor a bare number (serial number / page number column). The title
+ * is the longest text in a contents row, so a serial column that carries text
+ * (`Lesson 1`) cannot be mistaken for it.
  */
 function tableTitleCell(line: string): string | null {
   const cells = tableCells(line).filter(
     (cell) => !TABLE_SEPARATOR_CELL_RE.test(cell) && !TABLE_NUMERIC_CELL_RE.test(cell),
   );
-  return cells[0] ?? null;
+  if (cells.length === 0) return null;
+  return cells.reduce((longest, cell) => (cell.length > longest.length ? cell : longest));
 }
 
 /** Split normalized markdown into pages on form-feed characters (best effort). */
