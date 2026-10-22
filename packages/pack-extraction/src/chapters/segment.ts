@@ -79,11 +79,11 @@ export function headingMatchScore(entry: string, heading: string): number {
   const a = concatNormalized(entry);
   const b = concatNormalized(heading);
   let prefixRatio = 0;
-  const shortest = Math.min(a.length, b.length);
-  if (shortest > 0) {
+  const longest = Math.max(a.length, b.length);
+  if (longest > 0) {
     let common = 0;
-    while (common < shortest && a[common] === b[common]) common += 1;
-    prefixRatio = common / shortest;
+    while (common < longest && a[common] === b[common]) common += 1;
+    prefixRatio = common / longest;
   }
 
   return Math.max(tokenCoverage, prefixRatio);
