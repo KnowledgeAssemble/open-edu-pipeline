@@ -1113,20 +1113,21 @@ Provenance has two homes, both defined by the Pack System:
 1. **On each concept** — `ConceptSourceSchema` (`{documentId, locator?, section?, page?, excerpt?}`), required when the manifest declares `derivedFrom: "document"`.
 2. **`sources.json`** — optional per-pack file for evidence that attaches to the pack as a whole (source document identity, parse metadata, coverage ranges).
 
-> **Proposed, not yet a contract.** Pack System §7 lists `sources.json` as optional but defines **no schema** for it. The shape below is this pipeline's proposal; it must be ratified as a `PackSourceSchema` story in the Pack System before `emit/` treats it as stable.
+> **Canonical shape.** `sources.json` maps each `documentId` to a human-readable
+> record (`title` required; `publisher`, `year`, `url`, `license` optional), matching
+> `SourceDocumentSchema` in `@open-edu/packs`. It is **not** a `{ "documents": [...] }`
+> wrapper — the dev-server rejects that with `KNOWLEDGE_SOURCE_MISSING`.
 
 Example (`sources.json`):
 
 ```json
 {
-  "documents": [
-    {
-      "documentId": "nios-math-level-a",
-      "title": "Mathematics Level A",
-      "file": "Math_Level_A_english_medium.pdf",
-      "pages": [1, 96]
-    }
-  ]
+  "nios-math-level-a": {
+    "title": "Mathematics Level A",
+    "publisher": "NIOS",
+    "year": 2023,
+    "license": "CC-BY"
+  }
 }
 ```
 
@@ -1410,7 +1411,7 @@ open-edu-pipeline/
                                              #   assessment/activity evidence
 ```
 
-Pack schemas are **not** re-declared here: `emit/` conforms to `PackManifestSchema` / `ConceptSchema` / `CurriculumSchema` from `@open-edu/packs` (Pack System story 1.1). Until that package ships, `pack-extraction/` carries a local mirror of the three schemas with a comment pointing at the canonical source, and a test that fails when the canonical schemas land.
+Pack schemas are **not** re-declared here: `emit/` conforms to `PackManifestSchema` / `ConceptSchema` / `CurriculumSchema` from `@open-edu/packs` (Pack System story 1.1), consumed as the published `@open-edu/packs` npm dependency. `pack-extraction/src/schemas/` is a thin **re-export shim** over that package (`src/schemas/shim.test.ts` asserts identity, so a reintroduced local copy fails the suite). A cross-repo conformance test (`src/e2e/open-edu-conformance.test.ts`) emits a pack and loads/resolves it through the consumer-facing `@open-edu/packs` loader + resolver, keeping the emitted artifacts aligned with what Course Creator Studio actually reads.
 
 ---
 

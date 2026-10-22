@@ -1,4 +1,5 @@
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
+import { LearningIntent } from '../schemas/index.js';
 
 export const knowledgeManifest: PackManifest = {
   format: 'openedu-pack',
@@ -22,7 +23,7 @@ export const curriculumManifest: PackManifest = {
   name: 'NIOS Mathematics Level A — Curriculum Slice',
   author: 'KnowledgeAssemble',
   language: 'en',
-  requires: [],
+  requires: ['nios-math-a-knowledge'],
   derivedFrom: 'document',
 };
 
@@ -51,13 +52,9 @@ export const concepts: Concept[] = [
 ];
 
 export const sources = {
-  documents: [
-    {
-      documentId: 'nios-math-level-a',
-      title: 'Mathematics Level A',
-      file: 'lesson-5-fractions.md',
-    },
-  ],
+  'nios-math-level-a': {
+    title: 'Mathematics Level A',
+  },
 };
 
 export const curriculum: Curriculum = {
@@ -77,7 +74,7 @@ export const curriculum: Curriculum = {
           description: 'Recognise a fraction as a part of a whole.',
           bloomLevel: 'understand',
           concepts: [{ pack: 'nios-math-a-knowledge', concept: 'fraction' }],
-          requiresIntents: ['understand'],
+          requiresIntents: [LearningIntent.Understand],
         },
       ],
     },

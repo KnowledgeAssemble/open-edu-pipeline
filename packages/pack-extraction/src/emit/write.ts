@@ -2,29 +2,43 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Concept, Curriculum, PackManifest } from '../schemas/index.js';
 
-export interface PackDocumentSource {
-  documentId: string;
+/** Mirrors @open-edu/packs SourceDocument; sources.json maps documentId → record. */
+export interface PackSourceDocument {
   title: string;
-  file: string;
+  publisher?: string;
+  year?: number;
+  url?: string;
+  license?: string;
 }
+
+export type PackSources = Record<string, PackSourceDocument>;
 
 export interface KnowledgePackInput {
   outputDir: string; // e.g. output/nios-math-level-a/packs
   manifest: PackManifest; // zod-inferred, type 'knowledge'
   concepts: Concept[];
-  sources: { documents: PackDocumentSource[] };
+  sources: PackSources;
 }
 
 export interface CurriculumPackInput {
   outputDir: string; // e.g. output/nios-math-level-a/packs
   manifest: PackManifest; // zod-inferred, type 'curriculum'
   curriculum: Curriculum;
-  sources: { documents: PackDocumentSource[] };
+  sources: PackSources;
 }
 
 export function writeJson(filePath: string, value: unknown): void {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
+}
+
+/** Wrap a single source document as a sources.json map keyed by its documentId. */
+export function buildPackSources(
+  documentId: string,
+  title: string,
+  extra: Omit<PackSourceDocument, 'title'> = {},
+): PackSources {
+  return { [documentId]: { title: title.slice(0, 256), ...extra } };
 }
 
 export function emitKnowledgePack(input: KnowledgePackInput): { paths: string[] } {
