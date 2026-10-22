@@ -151,6 +151,11 @@ Under `output/<manifest.id>/`:
   curriculum-unit concept refs — no concept is silently dropped.
 - **Provenance.** Every concept/objective carries a verbatim source excerpt validated against
   the chapter text; packs stay `derivedFrom: "document"`.
+- **Chapter ids.** A chapter id is the slugified title of the heading the table of contents
+  matched (`1-reading-understanding-forming-and-writing-numbers`). Markdown-table contents are
+  read cell-wise, so serial-number and page-number columns never leak into a title.
+- **Objectives.** The chapter's stated learning objectives are extracted one per objective
+  (one per bullet when the chapter lists them) and never merged into a single objective.
 - **Exit code.** 0 on success; 1 if the run is aborted (e.g. budget), packs fail validation
   (with `--validate`), no curriculum units are emitted, or any `pending-human` chapter is
   present without `--allow-partial`.
