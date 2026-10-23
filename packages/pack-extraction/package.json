@@ -16,7 +16,8 @@
     "dist"
   ],
   "bin": {
-    "pack-extract": "./dist/cli/index.js"
+    "pack-extract": "./dist/cli/index.js",
+    "proofread-md": "./dist/proofread/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -28,7 +29,7 @@
     "extract:slice": "node dist/cli/index.js --source ../../fixtures/nios-math-a/lesson-5-fractions.md --manifest ../../fixtures/nios-math-a/source-manifest.json --output ../../output --validate"
   },
   "dependencies": {
-    "@llamaindex/liteparse": "^2.8.0",
+    "@llamaindex/liteparse": "^2.11.0",
     "@open-edu/packs": "0.1.0",
     "@open-edu/pipeline-llm": "workspace:*",
     "zod": "^3.22.0"

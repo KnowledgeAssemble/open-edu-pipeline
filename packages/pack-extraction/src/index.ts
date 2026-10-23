@@ -115,3 +115,42 @@ export type { CallEstimate } from './stages/budget.js';
 export { orchestrate } from './run/orchestrate.js';
 export type { OrchestrateOptions, OrchestrateResult } from './run/orchestrate.js';
 export type { RunReport, ChapterReport, RunTotals } from './run/report.js';
+
+export * from './proofread/types.js';
+export {
+  buildReference,
+  routePage,
+  shouldRouteToVision,
+  isContentPage,
+} from './proofread/reference.js';
+export type { ReferenceParseOptions, ReferenceRawProvenance } from './proofread/reference.js';
+export { alignPages, unavailablePageMap, pilotGate } from './proofread/align.js';
+export {
+  runDeterministicChecks,
+  pageCoverageFindings,
+  pageArtifactFindings,
+} from './proofread/checks.js';
+export { buildWindows, splitMarkdownByBoundaries } from './proofread/window.js';
+export { buildReviewPrompt, buildVerificationPrompt } from './proofread/prompt.js';
+export { FakeProofreadClient, FailingProofreadClient } from './proofread/fake.js';
+export { HttpProofreadClient } from './proofread/http-client.js';
+export { applyPatches, resolvePatch, patchWithinLimits, reconstruct } from './proofread/patch.js';
+export { assignIssuePage, dedupeIssues, sortIssues } from './proofread/detect.js';
+export {
+  groundEvidence,
+  autoApplyEligibility,
+  verifyCandidate,
+  isHighRisk,
+  isMaterialIssue,
+} from './proofread/verify.js';
+export { runProofread } from './proofread/orchestrate.js';
+export type { RunProofreadOptions } from './proofread/orchestrate.js';
+export {
+  resolveProofreadConfig,
+  buildProofreadClients,
+  hasProofreadCredentials,
+  defaultProofreadCliConfig,
+  consumeProofreadFlag,
+  runProofreadCli,
+} from './proofread/cli.js';
+export type { ProofreadCliConfig, ResolvedProofreadConfig } from './proofread/cli.js';
