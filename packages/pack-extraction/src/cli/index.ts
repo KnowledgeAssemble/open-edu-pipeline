@@ -22,6 +22,7 @@ import type { TierConfig } from '../config/stage-config.js';
 import type { LlmClient } from '../llm/client.js';
 import type { Concept, PackManifest } from '../schemas/index.js';
 import type { ProofreadResult } from '../proofread/types.js';
+import type { ReferenceRawProvenance } from '../proofread/reference.js';
 import {
   buildProofreadClients,
   consumeProofreadFlag,
@@ -308,6 +309,7 @@ interface ReadSourceResult {
   markdown: string;
   sourceFilename: string;
   writeSource: (sourceDir: string) => void;
+  rawProvenance?: ReferenceRawProvenance;
 }
 
 async function readSource(sourcePath: string, manifest: SourceManifest): Promise<ReadSourceResult> {
@@ -330,6 +332,9 @@ async function readSource(sourcePath: string, manifest: SourceManifest): Promise
     sourceFilename,
     writeSource: (sourceDir) =>
       writeFileSync(join(sourceDir, sourceFilename), result.contentMd, 'utf8'),
+    ...(result.manifest.liteparseVersion === undefined
+      ? {}
+      : { rawProvenance: { liteparseVersion: result.manifest.liteparseVersion } }),
   };
 }
 
@@ -534,6 +539,7 @@ export async function run(argv: string[]): Promise<number> {
         documentId: manifest.id,
         markdown: source.markdown,
         ...(proofreadPdf === undefined ? {} : { pdfPath: proofreadPdf }),
+        ...(source.rawProvenance === undefined ? {} : { rawProvenance: source.rawProvenance }),
         title: manifest.title,
         ...(manifest.language === undefined ? {} : { language: manifest.language }),
         workingDir: join(options.output, manifest.id),

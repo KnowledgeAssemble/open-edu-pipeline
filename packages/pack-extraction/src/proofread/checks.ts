@@ -9,7 +9,11 @@ export interface DeterministicCheckOptions {
 function issue(
   partial: Omit<ProofreadIssue, 'markdownExcerpt'> & { markdownExcerpt?: string },
 ): ProofreadIssue {
-  return ProofreadIssueSchema.parse({ markdownExcerpt: '', ...partial });
+  return ProofreadIssueSchema.parse({
+    markdownExcerpt: '',
+    deterministic: true,
+    ...partial,
+  });
 }
 
 function dedupe(findings: DeterministicFinding[]): DeterministicFinding[] {

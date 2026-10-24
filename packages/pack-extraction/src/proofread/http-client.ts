@@ -18,6 +18,8 @@ export interface HttpProofreadClientOptions {
   temperature?: number;
   supportsImages?: boolean;
   retries?: number;
+  /** Some OpenAI-compatible gateways reject `response_format`; set false to omit. */
+  jsonMode?: boolean;
   fetchImpl?: typeof fetch;
 }
 
@@ -90,6 +92,7 @@ export class HttpProofreadClient implements ProofreadClient {
   private readonly maxTokens: number;
   private readonly temperature: number;
   private readonly retries: number;
+  private readonly jsonMode: boolean;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: HttpProofreadClientOptions) {
@@ -101,6 +104,7 @@ export class HttpProofreadClient implements ProofreadClient {
     this.maxTokens = options.maxTokens ?? 8192;
     this.temperature = options.temperature ?? 0;
     this.retries = options.retries ?? 1;
+    this.jsonMode = options.jsonMode ?? process.env.PROOFREAD_JSON_MODE !== 'off';
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
   }
 
@@ -116,7 +120,7 @@ export class HttpProofreadClient implements ProofreadClient {
         messages,
         temperature: this.temperature,
         max_tokens: this.maxTokens,
-        response_format: { type: 'json_object' },
+        ...(this.jsonMode ? { response_format: { type: 'json_object' } } : {}),
       }),
     });
     if (!response.ok) {

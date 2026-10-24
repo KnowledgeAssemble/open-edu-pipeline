@@ -202,3 +202,92 @@ describe('runProofread integration', () => {
     expect(plan.estimatedTotalUsd).toBeGreaterThan(0);
   });
 });
+
+describe('status gating and reference provenance', () => {
+  const longProse =
+    'Ordinary prose continues here without any visual signal or duplicated content. '.repeat(6);
+
+  it('accepts a deep per-page diff when provenance is missing and lands at PASS_WITH_WARNINGS', async () => {
+    const work = tempWorkdir();
+    const raw = ['# Chapter One', '', `Prose ${longProse}`].join('\n');
+    const referenceWithMismatch = makeReference(
+      [makePage(1, `# Chapter One\n\nProse ${longProse}`)],
+      { referenceMismatch: true },
+    );
+    const client = new FakeProofreadClient({
+      review: ({ window }) => ({
+        pages: window.pageNums,
+        pagePresence: [],
+        issues: [],
+      }),
+    });
+    const result = await runProofread({
+      documentId: 'book',
+      markdown: raw,
+      workingDir: work.dir,
+      reviewDir: work.reviewDir,
+      proofreadMarkdownPath: work.proofreadPath,
+      reference: referenceWithMismatch,
+      reviewClient: client,
+      verifierClient: new FakeProofreadClient(),
+      budgetUsd: 1,
+    });
+    expect(result.status).toBe('PASS_WITH_WARNINGS');
+    expect(result.statusReasons.join(' ')).toContain('accepted by deep per-page diff');
+    expect(result.summary.referenceMismatch).toBe(true);
+    expect(result.summary.referenceMismatchAccepted).toBe(true);
+  });
+
+  it('keeps deterministic heading findings advisory instead of NEEDS_REVIEW', async () => {
+    const work = tempWorkdir();
+    const raw = ['# Chapter One', '', '### Skipped Level', '', `Prose ${longProse}`].join('\n');
+    const client = new FakeProofreadClient({
+      review: ({ window }) => ({
+        pages: window.pageNums,
+        pagePresence: [],
+        issues: [],
+      }),
+    });
+    const result = await runProofread({
+      documentId: 'book',
+      markdown: raw,
+      workingDir: work.dir,
+      reviewDir: work.reviewDir,
+      proofreadMarkdownPath: work.proofreadPath,
+      reference: makeReference([makePage(1, raw)]),
+      reviewClient: client,
+      verifierClient: new FakeProofreadClient(),
+      budgetUsd: 1,
+    });
+    expect(result.status).toBe('PASS_WITH_WARNINGS');
+    expect(result.issues.some((issue) => issue.deterministic === true)).toBe(true);
+  });
+
+  it('reports a source error once and requires review without duplicating the reason', async () => {
+    const work = tempWorkdir();
+    const raw = ['# Chapter One', '', `The sum 2 + 2 = 5 is shown. ${longProse}`].join('\n');
+    const client = new FakeProofreadClient({
+      review: ({ window }) => ({
+        pages: window.pageNums,
+        pagePresence: [],
+        issues: [],
+      }),
+    });
+    const result = await runProofread({
+      documentId: 'book',
+      markdown: raw,
+      workingDir: work.dir,
+      reviewDir: work.reviewDir,
+      proofreadMarkdownPath: work.proofreadPath,
+      reference: makeReference([makePage(1, raw)]),
+      reviewClient: client,
+      verifierClient: new FakeProofreadClient(),
+      budgetUsd: 1,
+    });
+    expect(result.status).toBe('NEEDS_REVIEW');
+    const sourceErrorReasons = result.statusReasons.filter((reason) =>
+      reason.includes('possible source error'),
+    );
+    expect(sourceErrorReasons).toHaveLength(1);
+  });
+});

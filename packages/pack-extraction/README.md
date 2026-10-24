@@ -101,61 +101,62 @@ node dist/cli/index.js --source ./book.md --legacy
 
 ## CLI options
 
-| Option                                       | Default                 | Description                                                     |
-| -------------------------------------------- | ----------------------- | --------------------------------------------------------------- |
-| `--source <file>`                            | _(required)_            | Markdown/plain text or PDF/DOCX/PPTX (non-markdown needs `lit`) |
-| `--manifest <file>`                          | _(derived)_             | Source manifest JSON; derived from the source when omitted      |
-| `--output <dir>`                             | `./output`              | Output root; artifacts land under `<dir>/<manifest.id>/`        |
-| `--parser <liteparse\|auto>`                 | `liteparse`             | Parser for non-markdown sources                                 |
-| `--lesson-heading <regex>`                   | —                       | H1 pattern used to split lessons (legacy path)                  |
-| `--knowledge-pack-id <id>`                   | `nios-math-a-knowledge` | Knowledge pack id                                               |
-| `--curriculum-pack-id <id>`                  | `nios-math-slice`       | Curriculum pack id                                              |
-| `--llm` / `--no-llm`                         | `auto`                  | Force LLM for all chapters / forbid LLM                         |
-| `--provider <name>`                          | `openai`                | Chapter-pipeline provider (`openai` \| `openrouter`)            |
-| `--fast-model <model>`                       | `gpt-4o-mini`           | Fast tier model (also `LLM_FAST_MODEL`)                         |
-| `--escalation-model <model>`                 | `gpt-4o`                | Escalation tier model (also `LLM_ESCALATION_MODEL`)             |
-| `--max-budget-usd <n>`                       | `2.0`                   | Estimated spend cap for the run                                 |
-| `--dry-run`                                  | `false`                 | Plan + per-chapter cost estimate; writes only `run-report.json` |
-| `--force`                                    | `false`                 | Bust the response cache                                         |
-| `--chapters <slugs\|ranges>`                 | all                     | Subset re-run, e.g. `unit-3` or `unit-3..unit-5`                |
-| `--toc-pages <range>`                        | _(auto)_                | TOC page range hint, e.g. `12-14`                               |
-| `--chapter-heading <regex>`                  | —                       | Explicit chapter-heading fallback                               |
-| `--allow-partial`                            | `false`                 | Treat `pending-human` chapters as warnings                      |
-| `--enrich`                                   | `false`                 | Run optional enrichment into `review/` only (never merged)      |
-| `--llm-provider` / `--llm-model`             | from env                | Enrichment provider/model (used only with `--enrich`)           |
-| `--legacy`                                   | `false`                 | Force the deterministic legacy path                             |
-| `--validate`                                 | `false`                 | Run both pack validators; failures force exit 1                 |
-| `--proofread`                                | `false`                 | Run the proofreading pre-stage (does not select chapters)       |
-| `--proofread-mode <report\|apply>`           | `apply`                 | Report-only, or apply verified corrections downstream           |
-| `--proofread-pdf <file>`                     | source PDF              | Original PDF for a Markdown source                              |
-| `--proofread-reference <auto\|vision\|text>` | `auto`                  | Page reference routing                                          |
-| `--proofread-model <model>`                  | `PROOFREAD_MODEL`       | Vision-capable review model                                     |
-| `--proofread-provider <name>`                | `PROOFREAD_PROVIDER`    | Proofreading provider                                           |
-| `--proofread-verifier-model <model>`         | independent             | Verifier for high-risk patches                                  |
-| `--proofread-verifier-provider <name>`       | review provider         | Verifier provider                                               |
-| `--proofread-budget-usd <n>`                 | `1.0`                   | Proofreading sub-cap, never additive to `--max-budget-usd`      |
-| `--proofread-pages <range>`                  | all                     | Subset re-run (e.g. `12-20`); requires a complete prior run     |
-| `--proofread-window <n>`                     | `2`                     | Text pages per review call                                      |
-| `--proofread-page-markers`                   | off                     | Insert `<!-- pdf-page: N -->` at safe block boundaries          |
-| `--proofread-verify <changed\|full>`         | `changed`               | Re-review changed pages, or every page                          |
-| `--proofread-strict`                         | `false`                 | Exit 1 on `NEEDS_REVIEW` or `PARTIAL`                           |
-| `--help`                                     | —                       | Show usage                                                      |
+| Option                                       | Default                 | Description                                                                    |
+| -------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `--source <file>`                            | _(required)_            | Markdown/plain text or PDF/DOCX/PPTX (non-markdown needs `lit`)                |
+| `--manifest <file>`                          | _(derived)_             | Source manifest JSON; derived from the source when omitted                     |
+| `--output <dir>`                             | `./output`              | Output root; artifacts land under `<dir>/<manifest.id>/`                       |
+| `--parser <liteparse\|auto>`                 | `liteparse`             | Parser for non-markdown sources                                                |
+| `--lesson-heading <regex>`                   | —                       | H1 pattern used to split lessons (legacy path)                                 |
+| `--knowledge-pack-id <id>`                   | `nios-math-a-knowledge` | Knowledge pack id                                                              |
+| `--curriculum-pack-id <id>`                  | `nios-math-slice`       | Curriculum pack id                                                             |
+| `--llm` / `--no-llm`                         | `auto`                  | Force LLM for all chapters / forbid LLM                                        |
+| `--provider <name>`                          | `openai`                | Chapter-pipeline provider (`openai` \| `openrouter`)                           |
+| `--fast-model <model>`                       | `gpt-4o-mini`           | Fast tier model (also `LLM_FAST_MODEL`)                                        |
+| `--escalation-model <model>`                 | `gpt-4o`                | Escalation tier model (also `LLM_ESCALATION_MODEL`)                            |
+| `--max-budget-usd <n>`                       | `2.0`                   | Estimated spend cap for the run                                                |
+| `--dry-run`                                  | `false`                 | Plan + per-chapter cost estimate; writes only `run-report.json`                |
+| `--force`                                    | `false`                 | Bust the response cache                                                        |
+| `--chapters <slugs\|ranges>`                 | all                     | Subset re-run, e.g. `unit-3` or `unit-3..unit-5`                               |
+| `--toc-pages <range>`                        | _(auto)_                | TOC page range hint, e.g. `12-14`                                              |
+| `--chapter-heading <regex>`                  | —                       | Explicit chapter-heading fallback                                              |
+| `--allow-partial`                            | `false`                 | Treat `pending-human` chapters as warnings                                     |
+| `--enrich`                                   | `false`                 | Run optional enrichment into `review/` only (never merged)                     |
+| `--llm-provider` / `--llm-model`             | from env                | Enrichment provider/model (used only with `--enrich`)                          |
+| `--legacy`                                   | `false`                 | Force the deterministic legacy path                                            |
+| `--validate`                                 | `false`                 | Run both pack validators; failures force exit 1                                |
+| `--proofread`                                | `false`                 | Run the proofreading pre-stage (does not select chapters)                      |
+| `--proofread-mode <report\|apply>`           | `apply`                 | Report-only, or apply verified corrections downstream                          |
+| `--proofread-pdf <file>`                     | source PDF              | Original PDF for a Markdown source                                             |
+| `--proofread-reference <auto\|vision\|text>` | `auto`                  | Page reference routing                                                         |
+| `--proofread-model <model>`                  | `PROOFREAD_MODEL`       | Vision-capable review model                                                    |
+| `--proofread-provider <name>`                | `PROOFREAD_PROVIDER`    | Proofreading provider                                                          |
+| `--proofread-verifier-model <model>`         | independent             | Verifier for high-risk patches                                                 |
+| `--proofread-verifier-provider <name>`       | review provider         | Verifier provider                                                              |
+| `--proofread-budget-usd <n>`                 | `1.0`                   | Proofreading sub-cap, never additive to `--max-budget-usd`                     |
+| `--proofread-pages <range>`                  | all                     | Subset re-run (e.g. `12-20`); requires a complete prior run                    |
+| `--proofread-window <n>`                     | `2`                     | Text pages per review call                                                     |
+| `--proofread-page-markers`                   | off                     | Insert `<!-- pdf-page: N -->` at safe block boundaries                         |
+| `--proofread-verify <changed\|full>`         | `changed`               | Re-review changed pages, or every page                                         |
+| `--proofread-strict`                         | `false`                 | Embedded: exit 1 on `NEEDS_REVIEW`/`PARTIAL`; standalone: exit 1 unless `PASS` |
+| `--help`                                     | —                       | Show usage                                                                     |
 
 ## Environment
 
-| Variable                                                   | Default                 | Description                                  |
-| ---------------------------------------------------------- | ----------------------- | -------------------------------------------- |
-| `LLM_PROVIDER`                                             | `openai`                | Chapter-pipeline provider                    |
-| `LLM_FAST_MODEL`                                           | `gpt-4o-mini`           | Fast tier model                              |
-| `LLM_ESCALATION_MODEL`                                     | `gpt-4o`                | Escalation tier model                        |
-| `LLM_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`    | —                       | Provider key (any one enables the LLM path)  |
-| `LLM_BASE_URL`                                             | —                       | OpenAI-compatible endpoint override          |
-| `PROOFREAD_PROVIDER` / `PROOFREAD_MODEL`                   | LLM / `deepseek4-flash` | Proofreading provider/model                  |
-| `PROOFREAD_VERIFIER_PROVIDER` / `PROOFREAD_VERIFIER_MODEL` | review values           | Independent verifier                         |
-| `PROOFREAD_REFERENCE`                                      | `auto`                  | Page reference routing                       |
-| `PROOFREAD_DPI`                                            | `150`                   | Screenshot DPI (reduced for oversized pages) |
-| `PROOFREAD_BUDGET_USD`                                     | `1.0`                   | Proofreading sub-cap                         |
-| `PROOFREAD_MAX_OUTPUT_TOKENS`                              | stage default           | Review/verification output ceiling           |
+| Variable                                                   | Default                 | Description                                          |
+| ---------------------------------------------------------- | ----------------------- | ---------------------------------------------------- |
+| `LLM_PROVIDER`                                             | `openai`                | Chapter-pipeline provider                            |
+| `LLM_FAST_MODEL`                                           | `gpt-4o-mini`           | Fast tier model                                      |
+| `LLM_ESCALATION_MODEL`                                     | `gpt-4o`                | Escalation tier model                                |
+| `LLM_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`    | —                       | Provider key (any one enables the LLM path)          |
+| `LLM_BASE_URL`                                             | —                       | OpenAI-compatible endpoint override                  |
+| `PROOFREAD_PROVIDER` / `PROOFREAD_MODEL`                   | LLM / `deepseek4-flash` | Proofreading provider/model                          |
+| `PROOFREAD_VERIFIER_PROVIDER` / `PROOFREAD_VERIFIER_MODEL` | review values           | Independent verifier                                 |
+| `PROOFREAD_REFERENCE`                                      | `auto`                  | Page reference routing                               |
+| `PROOFREAD_DPI`                                            | `150`                   | Screenshot DPI (reduced for oversized pages)         |
+| `PROOFREAD_BUDGET_USD`                                     | `1.0`                   | Proofreading sub-cap                                 |
+| `PROOFREAD_MAX_OUTPUT_TOKENS`                              | stage default           | Review/verification output ceiling                   |
+| `PROOFREAD_JSON_MODE`                                      | on                      | Set `off` for gateways that reject `response_format` |
 
 Costs are **estimates** (chars/4 × a per-model price table) because `@open-edu/pipeline-llm`
 surfaces no token usage. `run-report.json` records `estimate: true` and both estimated tokens
@@ -253,9 +254,17 @@ Under `output/<manifest.id>/`:
   character / 40 line limits.
 - **Verify before apply.** Every candidate patch is grounded against PDF text or an image and
   independently verified. Math, tables, numbers, reading order, and missing content require a
-  different verifier model/provider; otherwise they are report-only.
+  different verifier model/provider. The verifier defaults to the escalation model, so when no
+  distinct `PROOFREAD_VERIFIER_MODEL`/`PROOFREAD_VERIFIER_PROVIDER` is configured those
+  high-risk corrections are report-only (a warning is logged).
 - **Pages come from the map.** Model-supplied page numbers are ignored. An issue that cannot be
   tied to exactly one aligned page is not auto-applied.
+- **Hints do not gate.** Deterministic checks are advisory: duplicate-paragraph, heading-level,
+  encoding, and similar zero-token findings appear in the report and are passed to the model, but
+  only LLM-confirmed material issues (and arithmetic source errors) force `NEEDS_REVIEW`.
+- **Reference provenance.** A PDF parse records its LitParse version; when the raw Markdown has no
+  provenance, a deep per-page diff can accept equivalence and the run lands at
+  `PASS_WITH_WARNINGS` rather than `NEEDS_REVIEW`.
 - **Status precedence.** `PARTIAL > NEEDS_REVIEW > PASS_WITH_WARNINGS > PASS`. Missing PDF,
   unaligned content, missing vision references, budget aborts, and review failures are `PARTIAL`.
   Reference provenance mismatches, forced text-only visual pages, and unresolved material issues

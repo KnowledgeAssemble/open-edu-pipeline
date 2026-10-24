@@ -369,7 +369,7 @@ function printUsage(): void {
       '  --window <n>                    Text pages per review call (default: 2)',
       '  --page-markers / --no-page-markers',
       '  --verify <changed|full>         Verification scope (default: changed)',
-      '  --strict                        Exit 1 on NEEDS_REVIEW or PARTIAL',
+      '  --strict                        Exit 1 unless status is PASS (standalone)',
       '  --dry-run                       Plan routing and cost; no calls',
       '  --force                         Bust reference/review/verification caches',
       '  --help                          Show this help',
@@ -444,7 +444,9 @@ export async function runProofreadCli(argv: string[]): Promise<number> {
     console.log(`Report: ${result.artifacts.reportPath ?? 'n/a'}`);
     console.log(`Issues: ${result.artifacts.issuesPath ?? 'n/a'}`);
 
-    return result.status === 'PASS' || result.status === 'PASS_WITH_WARNINGS' ? 0 : 1;
+    const passing =
+      result.status === 'PASS' || (!options.strict && result.status === 'PASS_WITH_WARNINGS');
+    return passing ? 0 : 1;
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     return 1;

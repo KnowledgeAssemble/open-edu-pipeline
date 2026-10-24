@@ -20,6 +20,7 @@ import type {
   ReferenceRawProvenance,
 } from './reference.js';
 import { buildReviewPrompt, buildVerificationPrompt } from './prompt.js';
+import { sameReviewerAndVerifier } from './client.js';
 import { writeProofreadArtifacts } from './report.js';
 import type { PageArtifact, ReportData } from './report.js';
 import type {
@@ -51,7 +52,7 @@ import {
   isMaterialIssue,
   verifyCandidate,
 } from './verify.js';
-import { sha256, stableJson } from './util.js';
+import { normalizeWhitespace, sha256, stableJson } from './util.js';
 
 export interface RunProofreadOptions {
   documentId: string;
@@ -94,7 +95,8 @@ export interface RunProofreadOptions {
 
 interface ReviewCacheKeyInput {
   pages: number[];
-  markdown: string;
+  /** Full prompt, including deterministic findings, so hint changes invalidate. */
+  prompt: string;
   referenceHash: string;
   kind: string;
   promptVersion: string;
@@ -107,6 +109,56 @@ interface ReviewCacheKeyInput {
 
 function hashKey(value: unknown): string {
   return sha256(stableJson(value));
+}
+
+function tokenSet(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter((token) => token !== ''),
+  );
+}
+
+function textSimilarity(left: string, right: string): number {
+  if (left === right) return 1;
+  const a = tokenSet(left);
+  const b = tokenSet(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const token of a) if (b.has(token)) shared += 1;
+  return shared / Math.max(a.size, b.size);
+}
+
+/**
+ * Deep per-page diff accepted as equivalence when every aligned content page's
+ * normalized reference text matches its raw Markdown slice.
+ */
+function referenceEquivalent(
+  rawMarkdown: string,
+  reference: ReferenceBundle,
+  pageMap: PageMap,
+): { accepted: boolean; ratio: number } {
+  const rawLines = rawMarkdown.split(/\r?\n/);
+  let contentPages = 0;
+  let matchingPages = 0;
+  for (const entry of pageMap.pages) {
+    if (entry.confidence === 'low') continue;
+    const page = reference.pages.find((candidate) => candidate.pageNum === entry.pageNum);
+    if (page === undefined || !isContentPage(page)) continue;
+    contentPages += 1;
+    const referenceText = normalizeWhitespace(page.pageMarkdown || page.text);
+    const rawSlice = normalizeWhitespace(
+      rawLines.slice(entry.startLine - 1, entry.endLine).join('\n'),
+    );
+    if (referenceText === rawSlice || textSimilarity(referenceText, rawSlice) >= 0.9) {
+      matchingPages += 1;
+    }
+  }
+  const ratio = contentPages === 0 ? 1 : matchingPages / contentPages;
+  return { accepted: contentPages > 0 && ratio === 1, ratio };
 }
 
 function windowCacheReferenceHash(window: PageWindow): string {
@@ -157,18 +209,29 @@ function statusFor(input: {
   partialReasons: string[];
   issues: ProofreadIssue[];
   referenceMismatch: boolean;
+  referenceMismatchAccepted: boolean;
   forcedTextVisualPages: number;
   verifierUnavailable: boolean;
   dryRun: boolean;
 }): { status: ProofreadStatus; reasons: string[] } {
   const reasons = [...input.partialReasons];
-  const unresolvedMaterial = input.issues.filter(
-    (issue) => issue.autoApplied !== true && isMaterialIssue(issue),
-  );
-  const warnings = input.issues.filter((issue) => !isMaterialIssue(issue));
   const sourceErrors = input.issues.filter(
-    (issue) => issue.classification === 'POSSIBLE_SOURCE_ERROR',
+    (issue) => issue.classification === 'POSSIBLE_SOURCE_ERROR' && issue.autoApplied !== true,
   );
+  // Deterministic checks are hints, not conclusions: only LLM-confirmed material
+  // issues gate NEEDS_REVIEW. Source errors remain material by design.
+  const unresolvedMaterial = input.issues.filter(
+    (issue) =>
+      issue.autoApplied !== true &&
+      isMaterialIssue(issue) &&
+      issue.classification !== 'POSSIBLE_SOURCE_ERROR' &&
+      issue.deterministic !== true,
+  );
+  const advisories = input.issues.filter(
+    (issue) =>
+      issue.autoApplied !== true && (issue.deterministic === true || !isMaterialIssue(issue)),
+  );
+  const corrected = input.issues.filter((issue) => issue.autoApplied === true);
 
   if (input.partialReasons.length > 0) {
     return { status: 'PARTIAL', reasons };
@@ -187,7 +250,9 @@ function statusFor(input: {
     );
   }
   if (input.verifierUnavailable) {
-    needsReview.push('a required verifier was unavailable');
+    needsReview.push(
+      'a required independent verifier was unavailable; high-risk patches were report-only',
+    );
   }
   if (unresolvedMaterial.length > 0) {
     needsReview.push(`${unresolvedMaterial.length} unresolved material issue(s)`);
@@ -199,11 +264,16 @@ function statusFor(input: {
   if (needsReview.length > 0) {
     return { status: 'NEEDS_REVIEW', reasons: [...reasons, ...needsReview] };
   }
-  if (input.issues.length > 0) {
-    return {
-      status: 'PASS_WITH_WARNINGS',
-      reasons: [...reasons, `${warnings.length} non-material or corrected issue(s)`],
-    };
+
+  const warnings: string[] = [];
+  if (input.referenceMismatchAccepted) {
+    warnings.push('reference provenance mismatch accepted by deep per-page diff');
+  }
+  if (corrected.length > 0) warnings.push(`${corrected.length} confirmed correction(s)`);
+  if (advisories.length > 0) warnings.push(`${advisories.length} advisory finding(s)`);
+
+  if (warnings.length > 0) {
+    return { status: 'PASS_WITH_WARNINGS', reasons: [...reasons, ...warnings] };
   }
   return { status: 'PASS', reasons };
 }
@@ -223,6 +293,15 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
   const verifierClient = options.verifierClient;
   const reviewer = reviewClient ?? { provider: 'none', model: 'none' };
   const verifier = verifierClient ?? { provider: 'none', model: 'none' };
+  if (
+    reviewClient !== undefined &&
+    verifierClient !== undefined &&
+    sameReviewerAndVerifier(reviewer, verifier)
+  ) {
+    log(
+      'warning: proofread verifier is the same model/provider as the reviewer; high-risk patches will be report-only',
+    );
+  }
   const cache = new CacheStore(join(options.workingDir, 'cache', 'proofread'));
   const partialReasons: string[] = [];
   const verificationFailures: string[] = [];
@@ -287,6 +366,16 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
     pageMap = alignPages({ rawMarkdown: options.markdown, reference }).pageMap;
   } else {
     pageMap = unavailablePageMap(options.markdown);
+  }
+
+  const referenceMismatch = reference.available && reference.manifest.referenceMismatch;
+  const equivalence = referenceMismatch
+    ? referenceEquivalent(options.markdown, reference, pageMap)
+    : { accepted: false, ratio: 1 };
+  if (equivalence.accepted) {
+    log(
+      `reference provenance mismatch accepted by deep per-page diff (${(equivalence.ratio * 100).toFixed(1)}% pages match)`,
+    );
   }
 
   if (!reference.available) {
@@ -360,6 +449,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
       location: { lineStart: 0, lineEnd: 0 },
       proposedAction: 'flag',
       confidence: 'low',
+      deterministic: true,
     });
   }
 
@@ -436,7 +526,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
       });
       const key = hashKey({
         pages: window.pageNums,
-        markdown: window.markdown,
+        prompt,
         referenceHash: windowCacheReferenceHash(window),
         kind: window.kind,
         promptVersion: PROOFREAD_PROMPT_VERSION,
@@ -495,6 +585,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
       status: 'PARTIAL',
       now,
     });
+    summary.referenceMismatchAccepted = equivalence.accepted;
     const metadata = metadataFor({
       options,
       reference,
@@ -585,7 +676,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
 
       const key = hashKey({
         pages: window.pageNums,
-        markdown: window.markdown,
+        prompt,
         referenceHash: windowCacheReferenceHash(window),
         kind: window.kind,
         promptVersion: PROOFREAD_PROMPT_VERSION,
@@ -840,7 +931,9 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
         partialReasons.push('budget exceeded during changed-page re-review');
         break;
       }
-      const reReviewFindings = runDeterministicChecks(proofreadMarkdown);
+      const reReviewFindings = runDeterministicChecks(proofreadMarkdown, {
+        ...(options.assetPaths === undefined ? {} : { assetPaths: options.assetPaths }),
+      });
       const prompt = buildReviewPrompt({
         title: options.title ?? options.documentId,
         ...(options.language === undefined ? {} : { language: options.language }),
@@ -850,7 +943,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
       });
       const key = hashKey({
         pages: window.pageNums,
-        markdown: window.markdown,
+        prompt,
         referenceHash: windowCacheReferenceHash(window),
         kind: window.kind,
         promptVersion: PROOFREAD_PROMPT_VERSION,
@@ -911,6 +1004,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
       location: { lineStart: 1, lineEnd: 1 },
       proposedAction: 'flag',
       confidence: 'high',
+      deterministic: true,
     });
   }
 
@@ -930,6 +1024,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
         location: { lineStart: index + 1, lineEnd: index + 1 },
         proposedAction: 'flag',
         confidence: 'high',
+        deterministic: true,
       });
     }
   }
@@ -938,7 +1033,8 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
   const computed = statusFor({
     partialReasons,
     issues,
-    referenceMismatch: reference.available && reference.manifest.referenceMismatch,
+    referenceMismatch: referenceMismatch && !equivalence.accepted,
+    referenceMismatchAccepted: equivalence.accepted,
     forcedTextVisualPages,
     verifierUnavailable,
     dryRun: false,
@@ -978,6 +1074,7 @@ export async function runProofread(options: RunProofreadOptions): Promise<Proofr
     now,
   });
   summary.pagesUnverified = unverifiedPages.length;
+  summary.referenceMismatchAccepted = equivalence.accepted;
   summary.manualReviewPages = [
     ...new Set(
       sortedIssues

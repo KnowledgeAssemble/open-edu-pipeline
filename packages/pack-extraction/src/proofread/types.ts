@@ -105,6 +105,8 @@ export const ProofreadIssueSchema = z.object({
   confidence: ConfidenceSchema,
   autoApplied: z.boolean().optional(),
   verification: z.enum(['accepted', 'rejected', 'not-run']).optional(),
+  /** True for zero-token hint findings; these never gate status as material issues. */
+  deterministic: z.boolean().optional(),
 });
 export type ProofreadIssue = z.infer<typeof ProofreadIssueSchema>;
 
@@ -253,6 +255,7 @@ export interface ProofreadSummary {
   manualReviewPages: number[];
   costEstimateUsd: number;
   pageMapAvailable: boolean;
+  referenceMismatchAccepted?: boolean;
   downstreamSource: 'raw' | 'proofread';
   partialFallbackUsed: boolean;
   generatedAt: string;

@@ -122,6 +122,7 @@ export function renderReport(data: ReportData): string {
     `- LitParse version: \`${data.metadata.liteparseVersion}\``,
     `- Parse options SHA-256: \`${data.metadata.parseOptionsSha256 || 'n/a'}\``,
     `- Reference mismatch: ${data.summary.referenceMismatch ? 'yes' : 'no'}`,
+    `- Deep per-page diff accepted equivalence: ${data.summary.referenceMismatchAccepted ? 'yes' : 'no'}`,
     '',
     '## 4. Confirmed corrections',
     '',
