@@ -56,6 +56,16 @@ import { emptyTotals } from './report.js';
 
 class BudgetExceededError extends Error {}
 
+export interface ProofreadDownstreamSummary {
+  status: string;
+  downstreamSource: 'raw' | 'proofread';
+  partialFallbackUsed: boolean;
+  reportPath?: string;
+  issuesPath?: string;
+  patchesPath?: string;
+  pageMapPath?: string;
+}
+
 export interface OrchestrateOptions {
   markdown: string;
   manifest: SourceManifest;
@@ -77,6 +87,7 @@ export interface OrchestrateOptions {
   chapterHeading?: RegExp;
   allowPartial: boolean;
   validate: boolean;
+  proofread?: ProofreadDownstreamSummary;
   retries?: number;
   retryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -643,6 +654,9 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
     report.spentUsd = 0;
     report.exitCode = 0;
     writeJson(join(workingDir, 'review', 'run-report.json'), report);
+    if (options.proofread !== undefined) {
+      writeJson(join(workingDir, 'review', 'proofread-status.json'), options.proofread);
+    }
     return { exitCode: 0, report };
   }
 
@@ -900,6 +914,9 @@ export async function orchestrate(options: OrchestrateOptions): Promise<Orchestr
   writeJson(join(reviewDir, 'fidelity-report.json'), {
     status: anyLlmUsed ? 'llm-assisted' : 'pending-llm',
   });
+  if (options.proofread !== undefined) {
+    writeJson(join(reviewDir, 'proofread-status.json'), options.proofread);
+  }
 
   const flagItems: Array<{ type: string; id: string; note: string }> = [];
   for (const run of runs) {

@@ -21,6 +21,16 @@ import { resolveTierConfig } from '../config/stage-config.js';
 import type { TierConfig } from '../config/stage-config.js';
 import type { LlmClient } from '../llm/client.js';
 import type { Concept, PackManifest } from '../schemas/index.js';
+import type { ProofreadResult } from '../proofread/types.js';
+import type { ReferenceRawProvenance } from '../proofread/reference.js';
+import {
+  buildProofreadClients,
+  consumeProofreadFlag,
+  defaultProofreadCliConfig,
+  resolveProofreadConfig,
+} from '../proofread/cli.js';
+import type { ProofreadCliConfig } from '../proofread/cli.js';
+import { runProofread } from '../proofread/orchestrate.js';
 
 type LlmMode = 'auto' | 'force' | 'off';
 
@@ -49,6 +59,7 @@ interface CliOptions {
   chapterHeading?: RegExp;
   allowPartial: boolean;
   legacy: boolean;
+  proofread: ProofreadCliConfig;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -68,6 +79,7 @@ function parseArgs(argv: string[]): CliOptions {
     force: false,
     allowPartial: false,
     legacy: false,
+    proofread: defaultProofreadCliConfig(),
   };
   const errors: string[] = [];
 
@@ -78,6 +90,16 @@ function parseArgs(argv: string[]): CliOptions {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    try {
+      const consumed = consumeProofreadFlag(argv, index, options.proofread);
+      if (consumed !== undefined) {
+        index = consumed;
+        continue;
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      continue;
+    }
     switch (arg) {
       case '--source':
         options.source = requireValue('--source', argv[index + 1]);
@@ -237,6 +259,20 @@ function printUsage(): void {
       '  --toc-pages <range>          TOC page range hint (e.g. 12-14)',
       '  --chapter-heading <regex>    Explicit chapter heading fallback',
       '  --allow-partial              Treat pending-human chapters as warnings',
+      '  --proofread                   Run the proofreading pre-stage',
+      '  --proofread-mode <report|apply>  Report-only or apply verified corrections',
+      '  --proofread-pdf <file>       Original PDF for a Markdown source',
+      '  --proofread-reference <auto|vision|text>  Reference routing',
+      '  --proofread-model <model>    Vision review model',
+      '  --proofread-provider <name>  Proofreading provider',
+      '  --proofread-verifier-model <model>  Independent verifier model',
+      '  --proofread-verifier-provider <name>  Independent verifier provider',
+      '  --proofread-budget-usd <n>   Proofreading sub-cap (default: 1.0)',
+      '  --proofread-pages <range>    Subset re-run (e.g. 12-20)',
+      '  --proofread-window <n>       Text pages per review call (default: 2)',
+      '  --proofread-page-markers     Insert pdf-page markers at safe boundaries',
+      '  --proofread-verify <changed|full>  Verification scope',
+      '  --proofread-strict           Exit 1 on NEEDS_REVIEW or PARTIAL',
       '  --validate                   Validate emitted packs',
       '  --help                       Show this help',
     ].join('\n'),
@@ -273,6 +309,7 @@ interface ReadSourceResult {
   markdown: string;
   sourceFilename: string;
   writeSource: (sourceDir: string) => void;
+  rawProvenance?: ReferenceRawProvenance;
 }
 
 async function readSource(sourcePath: string, manifest: SourceManifest): Promise<ReadSourceResult> {
@@ -295,6 +332,9 @@ async function readSource(sourcePath: string, manifest: SourceManifest): Promise
     sourceFilename,
     writeSource: (sourceDir) =>
       writeFileSync(join(sourceDir, sourceFilename), result.contentMd, 'utf8'),
+    ...(result.manifest.liteparseVersion === undefined
+      ? {}
+      : { rawProvenance: { liteparseVersion: result.manifest.liteparseVersion } }),
   };
 }
 
@@ -457,15 +497,15 @@ export async function run(argv: string[]): Promise<number> {
 
     const source = await readSource(options.source, manifest);
 
-    const explicitPipeline =
-      options.dryRun ||
+    const nonMarkdown = !isPlainTextSource(options.source);
+    const chapterSelectors =
       options.llmMode === 'force' ||
       options.llmMode === 'off' ||
       options.force ||
       options.chapters !== undefined ||
       options.tocPages !== undefined ||
       options.chapterHeading !== undefined;
-    const nonMarkdown = !isPlainTextSource(options.source);
+    const explicitPipeline = chapterSelectors || (options.dryRun && !options.proofread.enabled);
     const autoChapter = options.manifest !== '' && nonMarkdown && hasLlmCredentials();
     const useChapterPipeline = !options.legacy && (explicitPipeline || autoChapter);
 
@@ -474,6 +514,69 @@ export async function run(argv: string[]): Promise<number> {
         '--llm requested but no API key found (LLM_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY)',
       );
       return 1;
+    }
+
+    let proofreadResult: ProofreadResult | undefined;
+    let selectedMarkdown = source.markdown;
+
+    if (options.proofread.enabled) {
+      const proofreadPdf = options.proofread.pdf ?? (nonMarkdown ? options.source : undefined);
+      if (proofreadPdf === undefined) {
+        if (options.proofread.reference === 'vision') {
+          throw new Error('--proofread-reference vision requires a PDF reference');
+        }
+        if (options.proofread.pageMarkers) {
+          throw new Error('--proofread-page-markers requires a PDF reference');
+        }
+        if (options.proofread.pages !== undefined) {
+          throw new Error('--proofread-pages requires a PDF reference');
+        }
+      }
+      const resolved = resolveProofreadConfig(options.proofread);
+      const clients = buildProofreadClients(resolved);
+      const base = source.sourceFilename.replace(/\.[^.]+$/, '');
+      proofreadResult = await runProofread({
+        documentId: manifest.id,
+        markdown: source.markdown,
+        ...(proofreadPdf === undefined ? {} : { pdfPath: proofreadPdf }),
+        ...(source.rawProvenance === undefined ? {} : { rawProvenance: source.rawProvenance }),
+        title: manifest.title,
+        ...(manifest.language === undefined ? {} : { language: manifest.language }),
+        workingDir: join(options.output, manifest.id),
+        reviewDir: join(options.output, manifest.id, 'review', 'proofread'),
+        proofreadMarkdownPath: join(options.output, manifest.id, 'source', `${base}.proofread.md`),
+        mode: resolved.mode,
+        referenceMode: resolved.reference,
+        ...(resolved.screenshotDpi === undefined ? {} : { screenshotDpi: resolved.screenshotDpi }),
+        pageMarkers: resolved.pageMarkers,
+        windowSize: resolved.windowSize,
+        verify: resolved.verify,
+        force: options.force,
+        dryRun: options.dryRun,
+        budgetUsd: Math.min(resolved.budgetUsd, options.maxBudgetUsd),
+        ...(resolved.pagesList === undefined ? {} : { pages: resolved.pagesList }),
+        strict: resolved.strict,
+        allowReferenceFailure: !nonMarkdown,
+        ...clients,
+        log: (message) => console.log(message),
+      });
+      selectedMarkdown = proofreadResult.selectedMarkdown;
+      if (options.dryRun && !useChapterPipeline) {
+        return proofreadStrictExit(options, proofreadResult);
+      }
+    }
+
+    if (proofreadResult !== undefined && !useChapterPipeline) {
+      writeJson(join(options.output, manifest.id, 'review', 'proofread-status.json'), {
+        status: proofreadResult.status,
+        statusReasons: proofreadResult.statusReasons,
+        downstreamSource: proofreadResult.downstreamSource,
+        partialFallbackUsed: proofreadResult.partialFallbackUsed,
+        reportPath: proofreadResult.artifacts.reportPath,
+        issuesPath: proofreadResult.artifacts.issuesPath,
+        patchesPath: proofreadResult.artifacts.patchesPath,
+        pageMapPath: proofreadResult.artifacts.pageMapPath,
+      });
     }
 
     if (useChapterPipeline) {
@@ -486,8 +589,12 @@ export async function run(argv: string[]): Promise<number> {
       if (options.llmMode !== 'off' && hasLlmCredentials()) {
         llmClient = await createLlmClient(tierConfig);
       }
+      const remainingBudget =
+        proofreadResult === undefined
+          ? options.maxBudgetUsd
+          : Math.max(0, options.maxBudgetUsd - proofreadResult.spentUsd);
       const result = await orchestrate({
-        markdown: source.markdown,
+        markdown: selectedMarkdown,
         manifest,
         workingDir: join(options.output, manifest.id),
         knowledgePackId: options.knowledgePackId,
@@ -499,7 +606,7 @@ export async function run(argv: string[]): Promise<number> {
         llmMode: options.llmMode,
         llmClient,
         tierConfig,
-        maxBudgetUsd: options.maxBudgetUsd,
+        maxBudgetUsd: remainingBudget,
         dryRun: options.dryRun,
         force: options.force,
         chapters: options.chapters,
@@ -507,12 +614,25 @@ export async function run(argv: string[]): Promise<number> {
         chapterHeading: options.chapterHeading,
         allowPartial: options.allowPartial,
         validate: options.validate,
+        ...(proofreadResult === undefined
+          ? {}
+          : {
+              proofread: {
+                status: proofreadResult.status,
+                downstreamSource: proofreadResult.downstreamSource,
+                partialFallbackUsed: proofreadResult.partialFallbackUsed,
+                reportPath: proofreadResult.artifacts.reportPath,
+                issuesPath: proofreadResult.artifacts.issuesPath,
+                patchesPath: proofreadResult.artifacts.patchesPath,
+                pageMapPath: proofreadResult.artifacts.pageMapPath,
+              },
+            }),
         log: (message) => console.log(message),
       });
-      return result.exitCode;
+      return Math.max(result.exitCode, proofreadStrictExit(options, proofreadResult));
     }
 
-    const lessons = segmentMarkdown(source.markdown, { lessonHeading: options.lessonHeading });
+    const lessons = segmentMarkdown(selectedMarkdown, { lessonHeading: options.lessonHeading });
 
     if (lessons.length > 1) {
       for (const lesson of lessons) {
@@ -535,13 +655,13 @@ export async function run(argv: string[]): Promise<number> {
           curriculumName: `${lesson.title} — Curriculum`,
           options,
         });
-        if (code !== 0) return code;
+        if (code !== 0) return Math.max(code, proofreadStrictExit(options, proofreadResult));
       }
-      return 0;
+      return proofreadStrictExit(options, proofreadResult);
     }
 
-    return await emitLesson({
-      markdown: source.markdown,
+    const singleCode = await emitLesson({
+      markdown: selectedMarkdown,
       manifest,
       workingDir: join(options.output, manifest.id),
       sourceFilename: source.sourceFilename,
@@ -552,10 +672,17 @@ export async function run(argv: string[]): Promise<number> {
       curriculumName: 'NIOS Mathematics Level A — Curriculum Slice',
       options,
     });
+    return Math.max(singleCode, proofreadStrictExit(options, proofreadResult));
   } catch (error) {
     console.error(error);
     return 1;
   }
+}
+
+function proofreadStrictExit(options: CliOptions, result: ProofreadResult | undefined): number {
+  if (result === undefined) return 0;
+  if (!options.proofread.strict) return 0;
+  return result.status === 'PASS' || result.status === 'PASS_WITH_WARNINGS' ? 0 : 1;
 }
 
 function slugifyLesson(value: string): string {
