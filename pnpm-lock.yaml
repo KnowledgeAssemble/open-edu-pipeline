@@ -36,7 +36,7 @@ importers:
   packages/pack-extraction:
     dependencies:
       '@llamaindex/liteparse':
-        specifier: ^2.8.0
+        specifier: ^2.11.0
         version: 2.11.0
       '@open-edu/packs':
         specifier: 0.1.0
