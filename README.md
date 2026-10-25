@@ -38,6 +38,10 @@ Full CLI reference, profiles, scope options, and configuration live in
   for chapters that fail verification → cross-chapter merge. Chapters fall back to the
   deterministic result when it is already sufficient. See
   [`docs/CHAPTER-LLM-PIPELINE-PLAN.md`](docs/CHAPTER-LLM-PIPELINE-PLAN.md).
+- **Markdown proofreading (opt-in, needs a provider key and a PDF).** A pre-stage verifies raw
+  LitParse Markdown against PDF page references and applies only verified conversion-error
+  patches. It is off by default; `PARTIAL` runs fall back to raw Markdown. See
+  [`docs/MARKDOWN-PROOFREADING-PLAN.md`](docs/MARKDOWN-PROOFREADING-PLAN.md).
 
 The slice fixture lives in [`fixtures/nios-math-a/`](fixtures/nios-math-a/) — one markdown lesson
 and its source manifest:
