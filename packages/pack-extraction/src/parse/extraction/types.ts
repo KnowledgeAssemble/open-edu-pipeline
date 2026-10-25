@@ -54,6 +54,8 @@ export const ExtractionManifestSchema = z.object({
   sourceType: z.string().min(1),
   extractor: z.string().min(1),
   version: z.string().min(1),
+  /** Version of the LitParse library/CLI that produced a non-markdown parse. */
+  liteparseVersion: z.string().min(1).optional(),
   pages: z.number().int().nonnegative(),
   images: z.number().int().nonnegative(),
   tables: z.number().int().nonnegative(),

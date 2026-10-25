@@ -2,8 +2,20 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import type { Extractor } from './interface.js';
 import type { ExtractionInput, ExtractionResult, ExtractionManifest, AssetInfo } from './types.js';
+
+const require = createRequire(import.meta.url);
+
+function liteparseVersion(): string | undefined {
+  try {
+    const version = (require('@llamaindex/liteparse/package.json') as { version?: string }).version;
+    return version === undefined ? undefined : String(version);
+  } catch {
+    return undefined;
+  }
+}
 
 const SUPPORTED_EXTENSIONS = [
   '.pdf',
@@ -103,6 +115,7 @@ export class LiteParseExtractor implements Extractor {
       sourceType,
       extractor: this.id,
       version: '1.0.0',
+      ...(liteparseVersion() === undefined ? {} : { liteparseVersion: liteparseVersion() }),
       pages: pageCount,
       images: assets.length,
       tables: tableCount,
